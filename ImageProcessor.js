@@ -624,24 +624,29 @@ class ImageProcessor {
         let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%">\n`;
         svg += `  <style>path { fill: none; stroke-width: 1px; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }</style>\n`;
 
+        // Wrap everything in a group to maintain visual appearance (top-left) while data is bottom-left
+        svg += `  <g transform="translate(0, ${height}) scale(1, -1)">\n`;
+
         // 1. Bed Frame Layer
-        svg += `  <g id="layer_bed_frame">\n`;
-        svg += `    <rect x="0" y="0" width="${width}" height="${height}" fill="none" stroke="#FF00FF" stroke-width="2"/>\n`;
-        svg += `  </g>\n`;
+        svg += `    <g id="layer_bed_frame">\n`;
+        svg += `      <rect x="0" y="0" width="${width}" height="${height}" fill="none" stroke="#FF00FF" stroke-width="2"/>\n`;
+        svg += `    </g>\n`;
 
         // 2. Data Layers
         for (const [layerId, data] of Object.entries(layersData)) {
             if (data.paths.length === 0) continue;
 
-            svg += `  <g id="${layerId}">\n`;
+            svg += `    <g id="${layerId}">\n`;
             data.paths.forEach(path => {
                 if (path.length < 2) return;
-                const d = `M ${path.map(pt => `${pt[0]},${pt[1]}`).join(' L ')}`;
-                svg += `    <path d="${d}" fill="none" stroke="${data.color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>\n`;
+                // Invert Y coordinate so the data uses a bottom-left origin
+                const d = `M ${path.map(pt => `${pt[0].toFixed(2)},${(height - pt[1]).toFixed(2)}`).join(' L ')}`;
+                svg += `      <path d="${d}" fill="none" stroke="${data.color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>\n`;
             });
-            svg += `  </g>\n`;
+            svg += `    </g>\n`;
         }
 
+        svg += `  </g>\n`;
         svg += `</svg>`;
         return {
             svg: svg,
