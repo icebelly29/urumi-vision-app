@@ -309,6 +309,20 @@
         </div>
         <input type="file" id="fileInput" accept="image/*,.svg">
 
+        <div class="controls-container" style="margin-top: 16px; margin-bottom: 8px; text-align: left; padding: 0 12px;">
+            <label style="display: flex; align-items: center; cursor: pointer; justify-content: space-between; font-size: 14px; font-weight: 500;">
+                <span>Vectorization Mode</span>
+                <select id="vectorizationMode" style="background: rgba(255, 255, 255, 0.1); border: 1px solid var(--border-color); color: white; border-radius: 8px; padding: 6px 12px; outline: none; font-family: inherit;">
+                    <option value="skeleton" selected>Center Line (Skeleton)</option>
+                    <option value="contour">Outline (Contour)</option>
+                </select>
+            </label>
+            <p style="font-size: 12px; margin-top: 8px; margin-bottom: 0; color: #9ca3af; text-align: center;">
+                <strong>Center Line:</strong> Single path, best for standard CNC (may fragment at intersections).<br/>
+                <strong>Outline:</strong> Traces exact borders of ink, best for shapes and text (cuts a thick strip).
+            </p>
+        </div>
+
         <div class="progress-container" id="progressContainer">
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
@@ -332,7 +346,10 @@
     <script>lucide.createIcons();</script>
     <script src="lib/trace_skeleton.js"></script>
     <script src="Communication.js"></script>
-    <script src="ImageProcessor.js?v=17"></script>
+    <script src="pipeline/WarpEngine.js"></script>
+    <script src="pipeline/InkExtractor.js"></script>
+    <script src="pipeline/SvgGenerator.js"></script>
+    <script src="ImageProcessor.js?v=18"></script>
     <script src="app.js"></script>
 
 </body>

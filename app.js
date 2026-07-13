@@ -95,8 +95,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     ctx.drawImage(img, 0, 0, img.width, img.height);
 
                     try {
+                        const vectorizationMode = document.getElementById('vectorizationMode').value;
                         progressStatus.innerHTML = 'Normalizing & Vectorizing...';
-                        const result = await processor.process(canvas);
+                        const result = await processor.process(canvas, vectorizationMode);
 
                         progressFill.style.width = '90%';
                         progressStatus.innerHTML = 'Sending via WebRTC...';
