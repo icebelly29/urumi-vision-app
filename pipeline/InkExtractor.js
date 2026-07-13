@@ -244,34 +244,45 @@ class InkExtractor {
                 let area = cv.contourArea(contour);
                 if (area < 100) { contour.delete(); continue; }
 
-                let perimeter = cv.arcLength(contour, true);
-                let approx = new cv.Mat();
-                // 0.05 is more forgiving for hand-drawn wiggles than 0.04
-                cv.approxPolyDP(contour, approx, 0.05 * perimeter, true);
+                // Use the convex hull to smooth out all hand-drawn wiggles
+                let hull = new cv.Mat();
+                cv.convexHull(contour, hull, false, true);
+                let hullArea = cv.contourArea(hull);
+                let solidity = area / (hullArea || 1);
 
                 let isGeometric = false;
-                let vertices = approx.rows;
 
-                if (vertices === 3) {
-                    let pts = [];
-                    for (let j = 0; j < 3; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
-                    pts.push([...pts[0]]);
-                    perfectShapes.push({ type: 'polygon', points: pts });
-                    isGeometric = true;
-                } else if (vertices === 4) {
-                    let pts = [];
-                    for (let j = 0; j < 4; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
-                    pts.push([...pts[0]]);
-                    perfectShapes.push({ type: 'polygon', points: pts });
-                    isGeometric = true;
-                } else {
-                    let circularity = 4 * Math.PI * (area / (perimeter * perimeter));
+                // Only attempt to snap to perfect geometry if the shape is mostly convex.
+                // A hollow triangle or circle has high solidity (~0.9+).
+                // An arrow or text has very low solidity (< 0.4) and will be left as a path.
+                if (solidity > 0.75) {
+                    let hullPerimeter = cv.arcLength(hull, true);
+                    let approx = new cv.Mat();
+                    // 0.05 is highly forgiving for snapping to perfect corners
+                    cv.approxPolyDP(hull, approx, 0.05 * hullPerimeter, true);
+                    
+                    let vertices = approx.rows;
+                    let circularity = 4 * Math.PI * (hullArea / (hullPerimeter * hullPerimeter));
+
                     // 0.75 allows for slightly squashed hand-drawn circles
                     if (circularity > 0.75) {
                         let circle = cv.minEnclosingCircle(contour);
                         perfectShapes.push({ type: 'circle', cx: circle.center.x, cy: circle.center.y, r: circle.radius });
                         isGeometric = true;
+                    } else if (vertices === 3) {
+                        let pts = [];
+                        for (let j = 0; j < 3; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
+                        pts.push([...pts[0]]);
+                        perfectShapes.push({ type: 'polygon', points: pts });
+                        isGeometric = true;
+                    } else if (vertices === 4) {
+                        let pts = [];
+                        for (let j = 0; j < 4; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
+                        pts.push([...pts[0]]);
+                        perfectShapes.push({ type: 'polygon', points: pts });
+                        isGeometric = true;
                     }
+                    approx.delete();
                 }
 
                 if (isGeometric) {
@@ -280,16 +291,18 @@ class InkExtractor {
                     let maskROI = new cv.Mat();
                     cv.bitwise_and(finalMask, blobMask, maskROI);
                     let inkArea = cv.countNonZero(maskROI);
+                    
                     // If it's a solid shape, fill it to erase it. If hollow, draw over the stroke to erase it.
                     if (area > 0 && inkArea / area > 0.6) {
                         cv.drawContours(finalMask, contours, i, new cv.Scalar(0), cv.FILLED);
                     } else {
                         // Use a thick brush to erase the stroke so it doesn't get skeletonized
-                        cv.drawContours(finalMask, contours, i, new cv.Scalar(0), 20);
+                        cv.drawContours(finalMask, contours, i, new cv.Scalar(0), 30);
                     }
                     blobMask.delete(); maskROI.delete();
                 }
-                approx.delete();
+                
+                hull.delete();
                 contour.delete();
             }
             contours.delete();
