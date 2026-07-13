@@ -138,17 +138,17 @@ class InkExtractor {
                 if (bestS > 25) {
                     if (bestH < 12 || bestH >= 168) {
                         votes.red++;
-                    } else if (bestH >= 12 && bestH < 36) {
-                        // Brown/orange zone: could be dark green ink OR cardboard edge
-                        // Dark green ink: gv < 90 (it's genuinely dark)
-                        // Cardboard edge: gv > 100 (it's lighter)
-                        // Black circle on cardboard: gv < 40 (very dark, low S)
-                        if (bestGv < 40) {
+                    } else if (bestH >= 12 && bestH < 24) {
+                        // Warm Brown zone: Black ink on brown cardboard usually reads as H=15-22.
+                        // We use a gv check to ensure it's actually dark ink, not just a cardboard shadow.
+                        if (bestGv < 85) {
                             votes.black++;
-                        } else if (bestGv < 90) {
-                            votes.green++; // Dark green ink appearing as olive/brown
                         }
-                        // else: gv >= 90 = cardboard surface, skip entirely
+                    } else if (bestH >= 24 && bestH < 36) {
+                        // Olive/Yellow zone: Dark green ink on brown cardboard shifts to H=27-35.
+                        if (bestGv < 90) {
+                            votes.green++;
+                        }
                     } else if (bestH >= 36 && bestH <= 115) {
                         if (bestH >= 105 && bestS > 100 && bestV > 120) {
                             votes.blue++;

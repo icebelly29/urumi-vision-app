@@ -58,7 +58,7 @@ class WarpEngine {
         // 1. cropPhysW, cropPhysH: The physical dimensions of the FINAL cropped drawing area (in mm).
         // 2. arucoToCropMargin: The physical distance from the ArUco centers to the crop boundary (in mm).
 
-        let cropPhysW, cropPhysH, arucoToCropMargin;
+        let cropPhysW, cropPhysH, arucoMarginX, arucoMarginY;
 
         if (detectedIds.includes(12) || detectedIds.includes(13) || detectedIds.includes(14) || detectedIds.includes(15)) {
             // Custom Frame Generator (IDs 12-15)
@@ -69,15 +69,15 @@ class WarpEngine {
             const physHeight = !isNaN(customH) ? customH : 1130.0;
 
             // aruco_pos in the JSON places ArUco centers at the paper corners [0,0] etc.
-            // The checkerboard border (corner_size=40mm) extends INWARD from these markers.
-            // To crop out the border, we define the output as the inner drawing area only:
-            //   cropPhysW/H = paper size minus border on both sides
-            //   arucoToCropMargin = border width (positive pushes ArUco outside the visible canvas)
-            const borderInset = 50; // 40mm corner_size + 10mm safety
-            cropPhysW = physWidth - 2 * borderInset;   // 730mm
-            cropPhysH = physHeight - 2 * borderInset;   // 1030mm
-            arucoToCropMargin = borderInset;             // ArUco centers land outside the canvas
+            // The user measured the actual inner drawing area as 780mm x 1070mm
+            // So we explicitly set the crop area to these dimensions.
+            cropPhysW = 775.0;
+            cropPhysH = 1065.0;
 
+            // The margin is half the difference between the ArUco frame size and the crop size.
+            // This properly handles rectangular margins (e.g. 25mm on sides, 30mm on top/bottom).
+            arucoMarginX = (physWidth - cropPhysW) / 2.0;
+            arucoMarginY = (physHeight - cropPhysH) / 2.0;
         } else {
             // Legacy Fixed Frames
             let physWidth = 210.0;
@@ -96,7 +96,8 @@ class WarpEngine {
             // We maintain this exact behavior to avoid breaking old printed frames.
             cropPhysW = physWidth - (2 * legacyMargin);
             cropPhysH = physHeight - (2 * legacyMargin);
-            arucoToCropMargin = legacyMargin;
+            arucoMarginX = legacyMargin;
+            arucoMarginY = legacyMargin;
         }
 
         // Store for SVG generation later
@@ -106,7 +107,8 @@ class WarpEngine {
         const outW = this.OUTPUT_WIDTH;
         const outH = Math.round(dotsPerMm * cropPhysH);
 
-        const marginPx = arucoToCropMargin * dotsPerMm;
+        const marginXPx = arucoMarginX * dotsPerMm;
+        const marginYPx = arucoMarginY * dotsPerMm;
 
         let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
             tl.x, tl.y,
@@ -116,20 +118,20 @@ class WarpEngine {
         ]);
 
         let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-            -marginPx, -marginPx,
-            outW + marginPx, -marginPx,
-            outW + marginPx, outH + marginPx,
-            -marginPx, outH + marginPx
+            -marginXPx, -marginYPx,
+            outW + marginXPx, -marginYPx,
+            outW + marginXPx, outH + marginYPx,
+            -marginXPx, outH + marginYPx
         ]);
 
-        console.log(`[Warp] cropPhysW=${cropPhysW}mm, cropPhysH=${cropPhysH}mm, margin=${arucoToCropMargin}mm`);
+        console.log(`[Warp] cropPhysW=${cropPhysW}mm, cropPhysH=${cropPhysH}mm, marginX=${arucoMarginX}mm, marginY=${arucoMarginY}mm`);
         console.log(`[Warp] Output canvas: ${outW}x${outH}px, dotsPerMm=${dotsPerMm.toFixed(3)}`);
         console.log(`[Warp] TL marker center in photo: (${tl.x.toFixed(1)}, ${tl.y.toFixed(1)})`);
         console.log(`[Warp] TR marker center in photo: (${tr.x.toFixed(1)}, ${tr.y.toFixed(1)})`);
         console.log(`[Warp] BR marker center in photo: (${br.x.toFixed(1)}, ${br.y.toFixed(1)})`);
         console.log(`[Warp] BL marker center in photo: (${bl.x.toFixed(1)}, ${bl.y.toFixed(1)})`);
-        console.log(`[Warp] marginPx=${marginPx.toFixed(1)}`);
-        console.log(`[Warp] Dst TL=(${-marginPx},${-marginPx}), TR=(${outW+marginPx},${-marginPx}), BR=(${outW+marginPx},${outH+marginPx}), BL=(${-marginPx},${outH+marginPx})`);
+        console.log(`[Warp] marginPx: X=${marginXPx.toFixed(1)}, Y=${marginYPx.toFixed(1)}`);
+        console.log(`[Warp] Dst TL=(${-marginXPx},${-marginYPx}), TR=(${outW + marginXPx},${-marginYPx}), BR=(${outW + marginXPx},${outH + marginYPx}), BL=(${-marginXPx},${outH + marginYPx})`);
 
         let M = cv.getPerspectiveTransform(srcTri, dstTri);
         let warped = new cv.Mat();
