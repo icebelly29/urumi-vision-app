@@ -228,9 +228,16 @@ class InkExtractor {
         let rawPaths = [];
 
         if (vectorizationMode === 'skeleton') {
+            // Heavily close the mask just for geometric detection to bridge gaps in hand-drawn shapes
+            let shapeMask = new cv.Mat();
+            let shapeKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(15, 15));
+            cv.morphologyEx(finalMask, shapeMask, cv.MORPH_CLOSE, shapeKernel);
+            shapeKernel.delete();
+
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
-            cv.findContours(finalMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            cv.findContours(shapeMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            shapeMask.delete();
 
             for (let i = 0; i < contours.size(); ++i) {
                 let contour = contours.get(i);
@@ -239,7 +246,8 @@ class InkExtractor {
 
                 let perimeter = cv.arcLength(contour, true);
                 let approx = new cv.Mat();
-                cv.approxPolyDP(contour, approx, 0.04 * perimeter, true);
+                // 0.05 is more forgiving for hand-drawn wiggles than 0.04
+                cv.approxPolyDP(contour, approx, 0.05 * perimeter, true);
 
                 let isGeometric = false;
                 let vertices = approx.rows;
@@ -258,7 +266,8 @@ class InkExtractor {
                     isGeometric = true;
                 } else {
                     let circularity = 4 * Math.PI * (area / (perimeter * perimeter));
-                    if (circularity > 0.8) {
+                    // 0.75 allows for slightly squashed hand-drawn circles
+                    if (circularity > 0.75) {
                         let circle = cv.minEnclosingCircle(contour);
                         perfectShapes.push({ type: 'circle', cx: circle.center.x, cy: circle.center.y, r: circle.radius });
                         isGeometric = true;
@@ -271,10 +280,12 @@ class InkExtractor {
                     let maskROI = new cv.Mat();
                     cv.bitwise_and(finalMask, blobMask, maskROI);
                     let inkArea = cv.countNonZero(maskROI);
-                    if (area > 0 && inkArea / area > 0.8) {
+                    // If it's a solid shape, fill it to erase it. If hollow, draw over the stroke to erase it.
+                    if (area > 0 && inkArea / area > 0.6) {
                         cv.drawContours(finalMask, contours, i, new cv.Scalar(0), cv.FILLED);
                     } else {
-                        cv.drawContours(finalMask, contours, i, new cv.Scalar(0), 15);
+                        // Use a thick brush to erase the stroke so it doesn't get skeletonized
+                        cv.drawContours(finalMask, contours, i, new cv.Scalar(0), 20);
                     }
                     blobMask.delete(); maskROI.delete();
                 }
