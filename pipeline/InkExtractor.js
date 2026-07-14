@@ -17,11 +17,11 @@ class InkExtractor {
         cv.adaptiveThreshold(blurred, adaptiveMask, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 51, 10);
         blurred.delete();
 
-        // STEP 2: Absolute darkness gate — only keep pixels with gray < 160.
-        // This kills cardboard edges (gray~170) and paper shadows (gray~200)
-        // while keeping all real ink (gray < 130 on any surface).
+        // STEP 2: Absolute darkness gate — only keep pixels with gray < 120.
+        // This completely kills cardboard edges (gray~140-170) and paper shadows
+        // while keeping all real black ink (gray < 80 on any surface).
         let darkGate = new cv.Mat();
-        cv.threshold(gray, darkGate, 160, 255, cv.THRESH_BINARY_INV);
+        cv.threshold(gray, darkGate, 120, 255, cv.THRESH_BINARY_INV);
         let darkInk = new cv.Mat();
         cv.bitwise_and(adaptiveMask, darkGate, darkInk);
         adaptiveMask.delete(); darkGate.delete();
@@ -77,92 +77,101 @@ class InkExtractor {
 
         for (let i = 0; i < allPaths.length; i++) {
             let shape = allPaths[i];
-            let samplePoints;
+            let evalPoints = [];
+            
             if (shape.type === 'circle') {
-                samplePoints = [];
-                for (let a = 0; a < 12; a++) {
-                    let angle = (a / 12) * Math.PI * 2;
-                    samplePoints.push([
+                for (let a = 0; a < 30; a++) {
+                    let angle = (a / 30) * Math.PI * 2;
+                    evalPoints.push([
                         Math.round(shape.cx + shape.r * Math.cos(angle)),
                         Math.round(shape.cy + shape.r * Math.sin(angle))
                     ]);
                 }
-            } else {
-                samplePoints = shape.points;
-            }
-            if (!samplePoints || samplePoints.length < 2) continue;
-
-            if (shape.type === 'path') {
+            } else if (shape.points && shape.points.length >= 2) {
                 let pathLen = 0;
-                for (let k = 1; k < samplePoints.length; k++) {
-                    let dx = samplePoints[k][0] - samplePoints[k - 1][0];
-                    let dy = samplePoints[k][1] - samplePoints[k - 1][1];
-                    pathLen += Math.sqrt(dx * dx + dy * dy);
+                let segments = [];
+                for (let k = 1; k < shape.points.length; k++) {
+                    let dx = shape.points[k][0] - shape.points[k - 1][0];
+                    let dy = shape.points[k][1] - shape.points[k - 1][1];
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    pathLen += dist;
+                    segments.push({dist, dx, dy, start: shape.points[k - 1]});
                 }
-                if (pathLen < 20) continue;
+                
+                if (shape.type === 'path' && pathLen < 20) continue;
+
+                let sampleCount = Math.min(30, Math.max(2, Math.floor(pathLen / 5)));
+                let step = pathLen / Math.max(1, sampleCount - 1);
+                let currentSegDist = 0;
+                let segIdx = 0;
+
+                for (let j = 0; j < sampleCount; j++) {
+                    let targetDist = j * step;
+                    while (segIdx < segments.length && currentSegDist + segments[segIdx].dist < targetDist - 0.001) {
+                        currentSegDist += segments[segIdx].dist;
+                        segIdx++;
+                    }
+                    let seg = segments[Math.min(segIdx, segments.length - 1)];
+                    let t = seg.dist > 0 ? (targetDist - currentSegDist) / seg.dist : 0;
+                    t = Math.max(0, Math.min(1, t));
+                    evalPoints.push([
+                        Math.round(seg.start[0] + seg.dx * t),
+                        Math.round(seg.start[1] + seg.dy * t)
+                    ]);
+                }
             }
+
+            if (evalPoints.length < 2) continue;
 
             let votes = { red: 0, green: 0, blue: 0, black: 0 };
             let debugHues = [];
-            let sampleCount = Math.min(30, samplePoints.length);
-            for (let j = 0; j < sampleCount; j++) {
-                let idx = Math.floor(j * (samplePoints.length - 1) / Math.max(1, sampleCount - 1));
-                let cpx = Math.round(samplePoints[idx][0]);
-                let cpy = Math.round(samplePoints[idx][1]);
+            
+            for (let j = 0; j < evalPoints.length; j++) {
+                let cpx = evalPoints[j][0];
+                let cpy = evalPoints[j][1];
 
                 // Search a 5x5 window but ONLY consider confirmed ink pixels (in allStrokes mask).
-                let bestS = -1, bestH = 0, bestV = 0, bestGv = 255;
+                let bestS = 0, bestH = 0, bestV = 0, bestGv = 255;
                 for (let wy = -2; wy <= 2; wy++) {
                     for (let wx = -2; wx <= 2; wx++) {
                         let sx = Math.max(0, Math.min(cpx + wx, hsv.cols - 1));
                         let sy = Math.max(0, Math.min(cpy + wy, hsv.rows - 1));
                         if (allStrokes.data[sy * allStrokes.cols + sx] === 0) continue;
                         let off = (sy * hsv.cols + sx) * 3;
-                        let cs = hsv.data[off + 1];
                         let cg = gray.data[sy * gray.cols + sx];
-                        if (cs > bestS) {
-                            bestS = cs; bestH = hsv.data[off]; bestV = hsv.data[off + 2]; bestGv = cg;
+                        
+                        // FIX: Find the DARKEST pixel (core of the ink), not the most saturated!
+                        // Cardboard is highly saturated. Seeking high saturation misses black/green ink
+                        // and forces the sample to the edge of the stroke where it blends into cardboard.
+                        if (cg < bestGv) {
+                            bestGv = cg; bestH = hsv.data[off]; bestS = hsv.data[off + 1]; bestV = hsv.data[off + 2];
                         }
                     }
                 }
-                if (bestS < 0) continue;
+                if (bestGv === 255) continue;
 
                 debugHues.push(`H=${bestH} S=${bestS} V=${bestV} gv=${bestGv}`);
 
-                // Classification based on actual measured values:
-                // Red arrow: H=4-9, S=200+, gv=45-67
-                // Green triangle on cardboard: H=27-43, S=94-126, gv=56-75
-                // Black circle: H=15-17, S=135-181, gv=26-37
-                // Cardboard boundary: H=15-19, S=68-134, gv=104-130
-                
-                if (bestS > 25) {
-                    if (bestH < 12 || bestH >= 168) {
-                        votes.red++;
-                    } else if (bestH >= 12 && bestH < 24) {
-                        // Warm Brown zone: Black ink on brown cardboard usually reads as H=15-22.
-                        // We use a gv check to ensure it's actually dark ink, not just a cardboard shadow.
-                        if (bestGv < 85) {
-                            votes.black++;
-                        }
-                    } else if (bestH >= 24 && bestH < 36) {
-                        // Olive/Yellow zone: Dark green ink on brown cardboard shifts to H=27-35.
-                        if (bestGv < 90) {
-                            votes.green++;
-                        }
-                    } else if (bestH >= 36 && bestH <= 115) {
-                        if (bestH >= 105 && bestS > 100 && bestV > 120) {
-                            votes.blue++;
-                        } else {
-                            votes.green++;
-                        }
-                    } else if (bestH > 115 && bestH <= 145) {
-                        votes.blue++;
-                    } else if (bestGv < 100) {
-                        votes.black++;
-                    }
-                } else if (bestGv < 100) {
-                    // Low saturation + very dark = true black ink
-                    votes.black++;
+                // Classification based on actual measured values at the DARKEST point:
+                // We lower the saturation threshold because the absolute darkest core of a 
+                // green line might have low saturation, but its Hue will still be green/blue.
+                if (bestS < 15) {
+                    // Extremely low saturation is usually a shadow or black ink.
+                    // Only count it if it's genuinely dark (ink), skipping paper shadows.
+                    if (bestGv < 90) votes.black++;
+                } else if (bestH < 15 || bestH >= 150) {
+                    votes.red++;
+                } else if (bestH >= 25 && bestH <= 130) {
+                    // Widen the 'green' bucket immensely (25 to 130).
+                    // This catches everything from olive green to pure blue.
+                    // Since you don't use a blue marker for anything else, it's safe to assume
+                    // any cool color (green/teal/blue) is meant to be the 'crease' line.
+                    votes.green++;
+                } else {
+                    // Hue 15-25 is the warm brown cardboard zone.
+                    // Black ink on cardboard assumes this hue, but the cardboard edges also do!
+                    // To ignore the cardboard boundary, enforce that the pixel is very dark (ink).
+                    if (bestGv < 90) votes.black++;
                 }
             }
 
@@ -343,12 +352,21 @@ class InkExtractor {
             if (maxDim > Math.min(imgWidth, imgHeight) * 0.15 && (maxDim / minDim) > 12) return null;
 
             let diagonal = Math.sqrt(width * width + height * height);
-            if (diagonal < 80) {
-                if (vectorizationMode === 'contour') return { type: 'path', points: this._simplifyPath(this._smoothPath(path, 2), 0.5) };
-                return { type: 'path', points: this._simplifyPath(this._smoothPath(path, 8), 1.2) };
+            
+            // For contour mode, use minimal simplification to preserve the exact ink border
+            if (vectorizationMode === 'contour') {
+                return { type: 'path', points: this._simplifyPath(path, 1.0) };
             }
-            if (vectorizationMode === 'contour') return { type: 'path', points: this._simplifyPath(this._smoothPath(path, 2), 1.0) };
-            return { type: 'path', points: this._simplifyPath(this._smoothPath(path, 15), 2.5) };
+            
+            // For skeleton mode, we want sharp lines. 
+            // We use standard Douglas-Peucker simplification which naturally creates straight lines and sharp corners.
+            // We remove the heavy _smoothPath moving-average because it destroys acute angles (like arrowheads).
+            if (diagonal < 80) {
+                // Small paths (text, details) - minimal smoothing to prevent jitter
+                return { type: 'path', points: this._simplifyPath(this._smoothPath(path, 2), 1.5) };
+            }
+            // Large paths (arrows, long lines) - no moving-average smoothing, just crisp simplification
+            return { type: 'path', points: this._simplifyPath(path, 3.0) };
         }).filter(p => p !== null);
 
         return perfectShapes.concat(smoothedPaths);
