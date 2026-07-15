@@ -39,18 +39,33 @@ class Communicator {
 
         this._updateStatus('connecting', 'Connecting to Main UI...');
         
-        // Initialize PeerJS
-        this.peer = new Peer();
+        try {
+            // Initialize PeerJS
+            this.peer = new Peer();
 
-        this.peer.on('open', (id) => {
-            console.log('My peer ID is: ' + id);
-            this._connectToMainUi();
-        });
+            // Set a timeout in case the connection hangs indefinitely
+            const connectionTimeout = setTimeout(() => {
+                if (this.statusCallback) {
+                    console.warn("PeerJS Connection timeout.");
+                    this._updateStatus('error', 'Connection Timeout');
+                }
+            }, 10000);
 
-        this.peer.on('error', (err) => {
-            console.error('PeerJS error:', err);
-            this._updateStatus('error', 'Connection Error');
-        });
+            this.peer.on('open', (id) => {
+                clearTimeout(connectionTimeout);
+                console.log('My peer ID is: ' + id);
+                this._connectToMainUi();
+            });
+
+            this.peer.on('error', (err) => {
+                clearTimeout(connectionTimeout);
+                console.error('PeerJS error:', err);
+                this._updateStatus('error', 'Connection Error');
+            });
+        } catch (err) {
+            console.error("Failed to initialize PeerJS:", err);
+            this._updateStatus('error', 'PeerJS Blocked');
+        }
     }
 
     _connectToMainUi() {
@@ -73,8 +88,8 @@ class Communicator {
 
     sendPayload(svgContent, imageUrl, meta) {
         if (!this.conn || !this.conn.open) {
-            console.warn("Not connected to Main UI. Cannot send payload.");
-            // We can download it manually if standalone
+            console.warn("Not connected to Main UI. Falling back to local download.");
+            this._downloadSvg(svgContent);
             return false;
         }
 
@@ -93,7 +108,25 @@ class Communicator {
             return true;
         } catch (e) {
             console.error("Failed to send payload:", e);
+            this._downloadSvg(svgContent);
             return false;
+        }
+    }
+
+    _downloadSvg(svgContent) {
+        try {
+            const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `urumi_vision_${Date.now()}.svg`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log("SVG downloaded locally.");
+        } catch (e) {
+            console.error("Failed to download SVG:", e);
         }
     }
 }
