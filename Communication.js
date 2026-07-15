@@ -73,7 +73,17 @@ class Communicator {
             reliable: true
         });
 
+        // Set a timeout for the actual P2P connection
+        const p2pTimeout = setTimeout(() => {
+            console.warn("P2P Connection timeout. The Main UI is unreachable.");
+            this._updateStatus('error', 'Main UI Unreachable');
+            if (this.conn) {
+                this.conn.close();
+            }
+        }, 10000);
+
         this.conn.on('open', () => {
+            clearTimeout(p2pTimeout);
             console.log('Connected to Main UI');
             this._updateStatus('connected', 'Connected');
             
@@ -83,6 +93,12 @@ class Communicator {
 
         this.conn.on('close', () => {
             this._updateStatus('error', 'Disconnected');
+        });
+
+        this.conn.on('error', (err) => {
+            clearTimeout(p2pTimeout);
+            console.error('P2P connection error:', err);
+            this._updateStatus('error', 'P2P Error');
         });
     }
 
