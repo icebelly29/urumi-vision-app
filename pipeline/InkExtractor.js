@@ -3,7 +3,7 @@ class InkExtractor {
         this.colorProfiles = colorProfiles;
     }
 
-    extractColorPaths(img, frameConfig, borderSizeMm, vectorizationMode = 'skeleton') {
+    extractColorPaths(img, frameConfig, borderSizeMm, vectorizationMode = 'skeleton', warpedMask = null) {
         let hsv = new cv.Mat();
         let gray = new cv.Mat();
         cv.cvtColor(img, hsv, cv.COLOR_RGBA2RGB);
@@ -61,6 +61,11 @@ class InkExtractor {
         let openK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
         cv.morphologyEx(allStrokes, allStrokes, cv.MORPH_OPEN, openK);
         openK.delete();
+
+        // 4c: Apply user Lasso Mask (if provided)
+        if (warpedMask && !warpedMask.empty()) {
+            cv.bitwise_and(allStrokes, warpedMask, allStrokes);
+        }
 
         // STEP 4b: Border exclusion — erase a thin strip around the image edge.
         // Cardboard edges and warping artifacts always appear at the periphery.
@@ -220,7 +225,9 @@ class InkExtractor {
             let area = stats.intPtr(i, cv.CC_STAT_AREA)[0];
             let compW = stats.intPtr(i, cv.CC_STAT_WIDTH)[0];
             let compH = stats.intPtr(i, cv.CC_STAT_HEIGHT)[0];
-            if (area >= areaFloor && Math.max(compW, compH) >= spanFloor) {
+            // We want to keep anything that is EITHER reasonably large (area) 
+            // OR reasonably long (span) to capture thin ink strokes.
+            if (area >= areaFloor || Math.max(compW, compH) >= spanFloor) {
                 keepLabel[i] = 255;
             }
         }

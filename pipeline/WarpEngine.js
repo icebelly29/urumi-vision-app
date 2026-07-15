@@ -4,7 +4,7 @@ class WarpEngine {
         this.currentFrameConfig = null;
         this.borderSizeMm = 0;
     }
-    normalizePerspective(src) {
+    normalizePerspective(src, srcMask = null) {
         let gray = new cv.Mat();
         cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
@@ -137,12 +137,19 @@ class WarpEngine {
         let warped = new cv.Mat();
         let size = new cv.Size(outW, outH);
         cv.warpPerspective(src, warped, M, size, cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255, 255, 255, 255));
+        
+        let warpedMask = null;
+        if (srcMask) {
+            warpedMask = new cv.Mat();
+            cv.warpPerspective(srcMask, warpedMask, M, size, cv.INTER_NEAREST, cv.BORDER_CONSTANT, new cv.Scalar(0));
+        }
+
         console.log(`[Warp] Done. Output mat: ${warped.cols}x${warped.rows}, channels=${warped.channels()}`);
 
         gray.delete(); corners.delete(); ids.delete(); dictionary.delete(); parameters.delete(); refineParameters.delete(); detector.delete();
         srcTri.delete(); dstTri.delete(); M.delete();
 
-        return warped;
+        return { image: warped, mask: warpedMask };
     }
 
 }

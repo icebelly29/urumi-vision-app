@@ -17,7 +17,7 @@ class ImageProcessor {
         this.inkExtractor = new InkExtractor(this.colorProfiles);
     }
 
-    async process(imageElement, vectorizationMode = 'skeleton') {
+    async process(imageElement, vectorizationMode = 'skeleton', maskCanvas = null) {
         if (!cv || !cv.Mat) {
             throw new Error("OpenCV is not initialized yet.");
         }
@@ -25,18 +25,25 @@ class ImageProcessor {
         console.log("Starting Image Processing Pipeline...");
 
         let src = cv.imread(imageElement);
-        let dst = new cv.Mat();
+        let srcMask = null;
+        if (maskCanvas) {
+            srcMask = cv.imread(maskCanvas);
+            cv.cvtColor(srcMask, srcMask, cv.COLOR_RGBA2GRAY);
+        }
 
         // 1. Detect ArUco & Normalize Perspective
-        const warpedMat = this.warpEngine.normalizePerspective(src);
-        if (!warpedMat) {
+        const warpResult = this.warpEngine.normalizePerspective(src, srcMask);
+        if (!warpResult || !warpResult.image) {
             src.delete();
-            dst.delete();
+            if (srcMask) srcMask.delete();
             throw new Error("Could not detect 4 ArUco markers for bed rectangle.");
         }
 
+        const warpedMat = warpResult.image;
+        const warpedMask = warpResult.mask; // Might be null
+
         // 2. Extract paths by color
-        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, vectorizationMode);
+        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, vectorizationMode, warpedMask);
 
         // 3. Generate Layered SVG
         const resultLayered = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, this.warpEngine.currentFrameConfig);
@@ -50,8 +57,9 @@ class ImageProcessor {
 
         // Cleanup OpenCV mats
         src.delete();
-        dst.delete();
         warpedMat.delete();
+        if (srcMask) srcMask.delete();
+        if (warpedMask) warpedMask.delete();
 
         console.log("Pipeline complete.");
 
