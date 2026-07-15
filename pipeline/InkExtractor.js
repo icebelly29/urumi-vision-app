@@ -162,26 +162,39 @@ class InkExtractor {
                 }
                 if (bestGv === 255) continue;
 
-                // Adjust RGB to perfectly equalize the warm bias of cardboard & room lighting
-                let adjR = bestR * 1.0;
-                let adjG = bestG * 1.1;
-                let adjB = bestB * 1.3;
-
-                debugHues.push(`R=${bestR} G=${bestG} B=${bestB}`);
-
-                // RGB Dominance Classification (Bypasses all HSV shifting artifacts)
-                if (adjG > adjR && adjG > adjB) {
-                    votes.green++;
-                } else if (adjB > adjR && adjB > adjG) {
-                    votes.blue++;
-                } else if (adjR > adjG && adjR > adjB) {
-                    // It's either Red ink or Black ink (which just darkens the red cardboard).
-                    // True Red ink has a massive difference between Red and the other channels.
-                    if (adjR - Math.max(adjG, adjB) > 25) {
-                        votes.red++;
-                    } else {
-                        votes.black++;
+                // Find local background color to adapt to shadows/lighting gradients
+                let bgR = 180, bgG = 140, bgB = 100;
+                for (let wx = 5; wx <= 20; wx++) {
+                    let bx = Math.min(cpx + wx, img.cols - 1);
+                    if (allStrokes.data[cpy * allStrokes.cols + bx] === 0) {
+                        let offBg = (cpy * img.cols + bx) * 4;
+                        bgR = img.data[offBg];
+                        bgG = img.data[offBg + 1];
+                        bgB = img.data[offBg + 2];
+                        break;
                     }
+                }
+
+                // Von Kries White Balance: Equalize the local background to pure gray
+                let bgAvg = (bgR + bgG + bgB) / 3;
+                let multR = bgAvg / Math.max(1, bgR);
+                let multG = bgAvg / Math.max(1, bgG);
+                let multB = bgAvg / Math.max(1, bgB);
+
+                let adjR = bestR * multR;
+                let adjG = bestG * multG;
+                let adjB = bestB * multB;
+
+                debugHues.push(`aR=${adjR.toFixed(0)} aG=${adjG.toFixed(0)} aB=${adjB.toFixed(0)}`);
+
+                // RGB Dominance Classification with noise margins
+                if (adjG > adjR && adjG > adjB && (adjG - Math.max(adjR, adjB) > 4)) {
+                    votes.green++;
+                } else if (adjB > adjR && adjB > adjG && (adjB - Math.max(adjR, adjG) > 4)) {
+                    votes.blue++;
+                } else if (adjR > adjG && adjR > adjB && (adjR - Math.max(adjG, adjB) > 15)) {
+                    // True Red ink has a massive difference; Pencil/Black on cardboard does not.
+                    votes.red++;
                 } else {
                     votes.black++;
                 }
