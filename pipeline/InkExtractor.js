@@ -17,11 +17,11 @@ class InkExtractor {
         cv.adaptiveThreshold(blurred, adaptiveMask, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 51, 10);
         blurred.delete();
 
-        // STEP 2: Absolute darkness gate — only keep pixels with gray < 120.
-        // This completely kills cardboard edges (gray~140-170) and paper shadows
-        // while keeping all real black ink (gray < 80 on any surface).
+        // STEP 2: Absolute darkness gate — only keep pixels with gray < 90.
+        // Cardboard edges are gray ~100-120, so this kills them.
+        // Colored ink lighter than 90 is caught by the color masks in STEP 3.
         let darkGate = new cv.Mat();
-        cv.threshold(gray, darkGate, 120, 255, cv.THRESH_BINARY_INV);
+        cv.threshold(gray, darkGate, 90, 255, cv.THRESH_BINARY_INV);
         let darkInk = new cv.Mat();
         cv.bitwise_and(adaptiveMask, darkGate, darkInk);
         adaptiveMask.delete(); darkGate.delete();
@@ -62,6 +62,14 @@ class InkExtractor {
         cv.morphologyEx(allStrokes, allStrokes, cv.MORPH_OPEN, openK);
         openK.delete();
 
+        // STEP 4b: Border exclusion — erase a thin strip around the image edge.
+        // Cardboard edges and warping artifacts always appear at the periphery.
+        let borderPx = Math.max(8, Math.floor(0.01 * Math.min(img.cols, img.rows)));
+        cv.rectangle(allStrokes, new cv.Point(0, 0), new cv.Point(img.cols, borderPx), new cv.Scalar(0), cv.FILLED);
+        cv.rectangle(allStrokes, new cv.Point(0, img.rows - borderPx), new cv.Point(img.cols, img.rows), new cv.Scalar(0), cv.FILLED);
+        cv.rectangle(allStrokes, new cv.Point(0, 0), new cv.Point(borderPx, img.rows), new cv.Scalar(0), cv.FILLED);
+        cv.rectangle(allStrokes, new cv.Point(img.cols - borderPx, 0), new cv.Point(img.cols, img.rows), new cv.Scalar(0), cv.FILLED);
+
         console.log(`[Ink] Mask pixels: ${cv.countNonZero(allStrokes)}, image: ${img.cols}x${img.rows}`);
 
         // STEP 5: Extract paths
@@ -78,7 +86,7 @@ class InkExtractor {
         for (let i = 0; i < allPaths.length; i++) {
             let shape = allPaths[i];
             let evalPoints = [];
-            
+
             if (shape.type === 'circle') {
                 for (let a = 0; a < 30; a++) {
                     let angle = (a / 30) * Math.PI * 2;
@@ -95,9 +103,9 @@ class InkExtractor {
                     let dy = shape.points[k][1] - shape.points[k - 1][1];
                     let dist = Math.sqrt(dx * dx + dy * dy);
                     pathLen += dist;
-                    segments.push({dist, dx, dy, start: shape.points[k - 1]});
+                    segments.push({ dist, dx, dy, start: shape.points[k - 1] });
                 }
-                
+
                 if (shape.type === 'path' && pathLen < 20) continue;
 
                 let sampleCount = Math.min(30, Math.max(2, Math.floor(pathLen / 5)));
@@ -125,7 +133,7 @@ class InkExtractor {
 
             let votes = { red: 0, green: 0, blue: 0, black: 0 };
             let debugHues = [];
-            
+
             for (let j = 0; j < evalPoints.length; j++) {
                 let cpx = evalPoints[j][0];
                 let cpy = evalPoints[j][1];
@@ -139,7 +147,7 @@ class InkExtractor {
                         if (allStrokes.data[sy * allStrokes.cols + sx] === 0) continue;
                         let off = (sy * hsv.cols + sx) * 3;
                         let cg = gray.data[sy * gray.cols + sx];
-                        
+
                         // FIX: Find the DARKEST pixel (core of the ink), not the most saturated!
                         // Cardboard is highly saturated. Seeking high saturation misses black/green ink
                         // and forces the sample to the edge of the stroke where it blends into cardboard.
@@ -152,23 +160,18 @@ class InkExtractor {
 
                 debugHues.push(`H=${bestH} S=${bestS} V=${bestV} gv=${bestGv}`);
 
-                // Classification based on actual measured values at the DARKEST point:
-                // We lower the saturation threshold because the absolute darkest core of a 
-                // green line might have low saturation, but its Hue will still be green/blue.
+                // Classification: use the darkest pixel's hue to determine color.
+                // No saturation gate on color — on cardboard the darkest pixel can
+                // have low saturation even for colored ink. Hue alone is reliable.
                 if (bestS < 15) {
-                    // Extremely low saturation is usually a shadow or black ink.
-                    // Only count it if it's genuinely dark (ink), skipping paper shadows.
+                    // Very low saturation — achromatic, definitely black ink or shadow
                     if (bestGv < 90) votes.black++;
                 } else if (bestH < 15 || bestH >= 150) {
                     votes.red++;
                 } else if (bestH >= 25 && bestH <= 130) {
-                    // Widen the 'green' bucket immensely (25 to 130).
-                    // This catches everything from olive green to pure blue.
-                    // Since you don't use a blue marker for anything else, it's safe to assume
-                    // any cool color (green/teal/blue) is meant to be the 'crease' line.
                     votes.green++;
                 } else {
-                    // Hue 15-25 is the warm brown cardboard zone.
+                    // Hue 15-24 is the warm brown cardboard zone.
                     // Black ink on cardboard assumes this hue, but the cardboard edges also do!
                     // To ignore the cardboard boundary, enforce that the pixel is very dark (ink).
                     if (bestGv < 90) votes.black++;
@@ -183,7 +186,7 @@ class InkExtractor {
             if (votes.green > mx) { dom = 'green'; mx = votes.green; }
             if (votes.blue > mx) { dom = 'blue'; mx = votes.blue; }
 
-            console.log(`[Ink] Path ${i} (${shape.type}): ${dom} | votes: R=${votes.red} G=${votes.green} B=${votes.blue} K=${votes.black} | samples: ${debugHues.slice(0,5).join(', ')}`);
+            console.log(`[Ink] Path ${i} (${shape.type}): ${dom} | votes: R=${votes.red} G=${votes.green} B=${votes.blue} K=${votes.black} | samples: ${debugHues.slice(0, 5).join(', ')}`);
 
             if (dom === 'red') results.score.paths.push(shape);
             else if (dom === 'green') results.crease.paths.push(shape);
@@ -205,8 +208,8 @@ class InkExtractor {
         let centroids = new cv.Mat();
         let numLabels = cv.connectedComponentsWithStats(preClosedStrokes, labels, stats, centroids, 8, cv.CV_32S);
 
-        let areaFloor = Math.max(4, Math.floor(0.000002 * imgWidth * imgHeight));
-        let spanFloor = Math.max(8, Math.floor(0.004 * Math.min(imgWidth, imgHeight)));
+        let areaFloor = Math.max(100, Math.floor(0.00005 * imgWidth * imgHeight));
+        let spanFloor = Math.max(20, Math.floor(0.01 * Math.min(imgWidth, imgHeight)));
 
         let filteredMask = cv.Mat.zeros(preClosedStrokes.rows, preClosedStrokes.cols, cv.CV_8UC1);
         let labelsData = labels.data32S;
@@ -217,7 +220,7 @@ class InkExtractor {
             let area = stats.intPtr(i, cv.CC_STAT_AREA)[0];
             let compW = stats.intPtr(i, cv.CC_STAT_WIDTH)[0];
             let compH = stats.intPtr(i, cv.CC_STAT_HEIGHT)[0];
-            if (area >= areaFloor || Math.max(compW, compH) >= spanFloor) {
+            if (area >= areaFloor && Math.max(compW, compH) >= spanFloor) {
                 keepLabel[i] = 255;
             }
         }
@@ -269,7 +272,7 @@ class InkExtractor {
                     let approx = new cv.Mat();
                     // 0.05 is highly forgiving for snapping to perfect corners
                     cv.approxPolyDP(hull, approx, 0.05 * hullPerimeter, true);
-                    
+
                     let vertices = approx.rows;
                     let circularity = 4 * Math.PI * (hullArea / (hullPerimeter * hullPerimeter));
 
@@ -278,15 +281,9 @@ class InkExtractor {
                         let circle = cv.minEnclosingCircle(contour);
                         perfectShapes.push({ type: 'circle', cx: circle.center.x, cy: circle.center.y, r: circle.radius });
                         isGeometric = true;
-                    } else if (vertices === 3) {
+                    } else if (vertices >= 3 && vertices <= 8) {
                         let pts = [];
-                        for (let j = 0; j < 3; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
-                        pts.push([...pts[0]]);
-                        perfectShapes.push({ type: 'polygon', points: pts });
-                        isGeometric = true;
-                    } else if (vertices === 4) {
-                        let pts = [];
-                        for (let j = 0; j < 4; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
+                        for (let j = 0; j < vertices; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
                         pts.push([...pts[0]]);
                         perfectShapes.push({ type: 'polygon', points: pts });
                         isGeometric = true;
@@ -300,7 +297,7 @@ class InkExtractor {
                     let maskROI = new cv.Mat();
                     cv.bitwise_and(finalMask, blobMask, maskROI);
                     let inkArea = cv.countNonZero(maskROI);
-                    
+
                     // If it's a solid shape, fill it to erase it. If hollow, draw over the stroke to erase it.
                     if (area > 0 && inkArea / area > 0.6) {
                         cv.drawContours(finalMask, contours, i, new cv.Scalar(0), cv.FILLED);
@@ -310,7 +307,7 @@ class InkExtractor {
                     }
                     blobMask.delete(); maskROI.delete();
                 }
-                
+
                 hull.delete();
                 contour.delete();
             }
@@ -352,12 +349,12 @@ class InkExtractor {
             if (maxDim > Math.min(imgWidth, imgHeight) * 0.15 && (maxDim / minDim) > 12) return null;
 
             let diagonal = Math.sqrt(width * width + height * height);
-            
+
             // For contour mode, use minimal simplification to preserve the exact ink border
             if (vectorizationMode === 'contour') {
                 return { type: 'path', points: this._simplifyPath(path, 1.0) };
             }
-            
+
             // For skeleton mode, we want sharp lines. 
             // We use standard Douglas-Peucker simplification which naturally creates straight lines and sharp corners.
             // We remove the heavy _smoothPath moving-average because it destroys acute angles (like arrowheads).
@@ -401,7 +398,7 @@ class InkExtractor {
         for (let iter = 0; iter < iterations; iter++) {
             let s = [cur[0]];
             for (let i = 1; i < cur.length - 1; i++) {
-                s.push([cur[i-1][0]*0.25 + cur[i][0]*0.5 + cur[i+1][0]*0.25, cur[i-1][1]*0.25 + cur[i][1]*0.5 + cur[i+1][1]*0.25]);
+                s.push([cur[i - 1][0] * 0.25 + cur[i][0] * 0.5 + cur[i + 1][0] * 0.25, cur[i - 1][1] * 0.25 + cur[i][1] * 0.5 + cur[i + 1][1] * 0.25]);
             }
             s.push(cur[cur.length - 1]);
             cur = s;
@@ -411,8 +408,8 @@ class InkExtractor {
 
     _perpendicularDistance(pt, lineStart, lineEnd) {
         let x0 = pt[0], y0 = pt[1], x1 = lineStart[0], y1 = lineStart[1], x2 = lineEnd[0], y2 = lineEnd[1];
-        let den = Math.sqrt((y2-y1)**2 + (x2-x1)**2);
-        if (den === 0) return Math.sqrt((x0-x1)**2 + (y0-y1)**2);
-        return Math.abs((y2-y1)*x0 - (x2-x1)*y0 + x2*y1 - y2*x1) / den;
+        let den = Math.sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2);
+        if (den === 0) return Math.sqrt((x0 - x1) ** 2 + (y0 - y1) ** 2);
+        return Math.abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1) / den;
     }
 }
