@@ -104,8 +104,24 @@ document.addEventListener('DOMContentLoaded', () => {
                             runPipeline(canvas, vectorizationMode, null);
                         }
                     } catch (err) {
-    });
+                        showError("Processing failed: " + err.message);
+                    }
+                };
 
+                img.onerror = () => {
+                    URL.revokeObjectURL(imgUrl);
+                    showError("Failed to load image data.");
+                };
+                
+                img.src = imgUrl;
+            } else {
+                showError("Unsupported file format. Please upload an image or SVG.");
+            }
+        } catch (error) {
+            console.error(error);
+            showError("Error: " + error.message);
+        }
+    });
     // Pipeline Execution Logic
     async function runPipeline(imgCanvas, vectorizationMode, maskCanvas) {
         progressContainer.style.display = 'block';
