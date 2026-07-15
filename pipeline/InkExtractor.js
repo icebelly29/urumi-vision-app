@@ -188,19 +188,22 @@ class InkExtractor {
                 debugHues.push(`aR=${adjR.toFixed(0)} aG=${adjG.toFixed(0)} aB=${adjB.toFixed(0)}`);
 
                 // Hybrid Classification:
-                // Cardboard is yellowish (high R, med G, low B). 
-                // Black ink will naturally have raw R > G > B, so raw dominance falsely classifies Black as Red. 
-                // We MUST use Von Kries `adjR` to correctly distinguish true Red from Black.
-                // However, dark Green ink absorbs heavily, and the camera noise floor artificially inflates raw Blue.
-                // Von Kries `multB` (e.g. 1.4x) explodes this blue noise, causing dark Green ink to falsely vote Blue.
-                // Since Black ink inherently has raw G > B (because cardboard has G > B), 
-                // we can safely use RAW G and RAW B to distinguish Green and Blue from Black without false positives!
+                // Cardboard is heavily biased towards Red (R=180, G=140, B=100).
+                // If green ink is thin or blurry, the cardboard's Red bias shines through, causing raw R > raw G.
+                // Thus, we MUST use Von Kries (`adjG` > `adjR`) to correctly extract Green from the Red background.
+                // However, the low Blue of the Cardboard forces the Von Kries `multB` very high (e.g., 1.4x).
+                // This artificially explodes Blue camera noise in dark inks, falsely causing Green/Black ink to vote Blue.
+                // Thus, we MUST use RAW data (`bestB` > `bestG`) to safely separate Blue from Green!
                 
-                if (bestG > bestR && bestG > bestB && (bestG - Math.max(bestR, bestB) > 2)) {
+                let isGreen = (adjG > adjR + 5) && (bestG > bestB + 2);
+                let isBlue  = (bestB > bestG + 10) && (bestB > bestR + 5);
+                let isRed   = (adjR > adjG + 15) && (adjR > adjB + 15);
+
+                if (isGreen) {
                     pointColors.push('green');
-                } else if (bestB > bestG && bestB > bestR && (bestB - Math.max(bestR, bestG) > 5)) {
+                } else if (isBlue) {
                     pointColors.push('blue');
-                } else if (adjR > adjG && adjR > adjB && (adjR - Math.max(adjG, adjB) > 15)) {
+                } else if (isRed) {
                     pointColors.push('red');
                 } else {
                     pointColors.push('black');
