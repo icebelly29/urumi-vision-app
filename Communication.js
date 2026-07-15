@@ -81,7 +81,7 @@ class Communicator {
             if (this.conn) {
                 this.conn.close();
             }
-        }, 10000);
+        }, 30000);
 
         this.conn.on('open', () => {
             clearTimeout(p2pTimeout);
