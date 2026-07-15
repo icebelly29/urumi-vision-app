@@ -56,9 +56,8 @@
     // Local IP address detected
     const LOCAL_IP = '192.168.33.106';
 
-    // Generate a fresh random peer ID every time to prevent the public server
-    // from locking or rate-limiting a hardcoded ID like 'main-ui-test-12345'.
-    const peer = new Peer({ debug: 2 }); 
+    const peer = new Peer('main-ui-test-12345'); 
+    
     const statusEl = document.getElementById('status');
     const linkContainer = document.getElementById('link-container');
     const qrLink = document.getElementById('qr-link');
@@ -95,20 +94,9 @@
     });
 
     peer.on('connection', (conn) => {
-        statusEl.textContent = 'Mobile Device Negotiating...';
-        statusEl.style.color = 'orange';
-        
-        conn.on('open', () => {
-            statusEl.textContent = 'Mobile Device Connected!';
-            statusEl.style.color = 'green';
-            linkContainer.style.display = 'none';
-        });
-
-        conn.on('error', (err) => {
-            console.error("Connection Error:", err);
-            statusEl.textContent = 'Connection Error: ' + err;
-            statusEl.style.color = 'red';
-        });
+        statusEl.textContent = 'Mobile Device Connected!';
+        statusEl.style.color = 'green';
+        linkContainer.style.display = 'none';
 
         conn.on('data', (data) => {
             if (data.type === 'MOBILE_APP_READY') {

@@ -39,52 +39,26 @@ class Communicator {
 
         this._updateStatus('connecting', 'Connecting to Main UI...');
         
-        try {
-            // Initialize PeerJS
-            this.peer = new Peer({ debug: 2 });
+        // Initialize PeerJS
+        this.peer = new Peer();
 
-            // Set a timeout in case the connection hangs indefinitely
-            const connectionTimeout = setTimeout(() => {
-                if (this.statusCallback) {
-                    console.warn("PeerJS Connection timeout.");
-                    this._updateStatus('error', 'Connection Timeout');
-                }
-            }, 10000);
+        this.peer.on('open', (id) => {
+            console.log('My peer ID is: ' + id);
+            this._connectToMainUi();
+        });
 
-            this.peer.on('open', (id) => {
-                clearTimeout(connectionTimeout);
-                console.log('My peer ID is: ' + id);
-                this._connectToMainUi();
-            });
-
-            this.peer.on('error', (err) => {
-                clearTimeout(connectionTimeout);
-                console.error('PeerJS error:', err);
-                this._updateStatus('error', 'Connection Error');
-            });
-        } catch (err) {
-            console.error("Failed to initialize PeerJS:", err);
-            this._updateStatus('error', 'PeerJS Blocked');
-        }
+        this.peer.on('error', (err) => {
+            console.error('PeerJS error:', err);
+            this._updateStatus('error', 'Connection Error');
+        });
     }
 
     _connectToMainUi() {
-        console.log('Initiating connection to Main UI:', this.mainUiPeerId);
         this.conn = this.peer.connect(this.mainUiPeerId, {
             reliable: true
         });
 
-        // Set a timeout for the actual P2P connection
-        const p2pTimeout = setTimeout(() => {
-            console.warn("P2P Connection timeout. The Main UI is unreachable.");
-            this._updateStatus('error', 'Main UI Unreachable');
-            if (this.conn) {
-                this.conn.close();
-            }
-        }, 30000);
-
         this.conn.on('open', () => {
-            clearTimeout(p2pTimeout);
             console.log('Connected to Main UI');
             this._updateStatus('connected', 'Connected');
             
@@ -95,18 +69,12 @@ class Communicator {
         this.conn.on('close', () => {
             this._updateStatus('error', 'Disconnected');
         });
-
-        this.conn.on('error', (err) => {
-            clearTimeout(p2pTimeout);
-            console.error('P2P connection error:', err);
-            this._updateStatus('error', 'P2P Error');
-        });
     }
 
     sendPayload(svgContent, imageUrl, meta) {
         if (!this.conn || !this.conn.open) {
-            console.warn("Not connected to Main UI. Falling back to local download.");
-            this._downloadSvg(svgContent);
+            console.warn("Not connected to Main UI. Cannot send payload.");
+            // We can download it manually if standalone
             return false;
         }
 
@@ -125,25 +93,7 @@ class Communicator {
             return true;
         } catch (e) {
             console.error("Failed to send payload:", e);
-            this._downloadSvg(svgContent);
             return false;
-        }
-    }
-
-    _downloadSvg(svgContent) {
-        try {
-            const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `urumi_vision_${Date.now()}.svg`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            console.log("SVG downloaded locally.");
-        } catch (e) {
-            console.error("Failed to download SVG:", e);
         }
     }
 }
