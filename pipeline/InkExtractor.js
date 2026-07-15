@@ -165,22 +165,23 @@ class InkExtractor {
 
                 debugHues.push(`H=${bestH} S=${bestS} V=${bestV} gv=${bestGv}`);
 
-                // Classification: use the darkest pixel's hue to determine color.
-                // We relaxed the saturation gate for black ink because black ink often has 
-                // some color noise under varied lighting.
-                // Relaxed saturation check to catch colored pens that appear slightly washed out
-                if (bestS < 20) {
+                // Robust Classification Model
+                if (bestS < 15) {
+                    // Extremely low saturation: Achromatic (white paper or true black)
                     if (bestGv < 140) votes.black++;
-                } else if (bestH < 15 || bestH > 150) {
+                } else if (bestH >= 12 && bestH <= 32) {
+                    // Cardboard Hue Zone (Brown/Yellow). 
+                    // Black ink on cardboard adopts this hue, so we accept it if it's dark.
+                    if (bestGv < 120) votes.black++;
+                } else if (bestH < 12 || bestH > 155) {
+                    // Red and Magenta
                     votes.red++;
-                } else if (bestH >= 30 && bestH <= 90) {
+                } else if (bestH > 32 && bestH <= 90) {
+                    // Green and Yellow-Green
                     votes.green++;
-                } else if (bestH > 90 && bestH <= 150) {
+                } else if (bestH > 90 && bestH <= 155) {
+                    // Blue, Cyan, and Purple
                     votes.blue++;
-                } else {
-                    // Hue 15-29 is the warm brown/yellow cardboard zone.
-                    // If the ink falls here, it's either yellow or it's black ink adopting the cardboard's hue.
-                    if (bestGv < 110) votes.black++;
                 }
             }
 
