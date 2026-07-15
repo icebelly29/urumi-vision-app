@@ -189,30 +189,64 @@ class InkExtractor {
 
                 // RGB Dominance Classification with noise margins
                 if (adjG > adjR && adjG > adjB && (adjG - Math.max(adjR, adjB) > 4)) {
-                    votes.green++;
+                    pointColors.push('green');
                 } else if (adjB > adjR && adjB > adjG && (adjB - Math.max(adjR, adjG) > 4)) {
-                    votes.blue++;
+                    pointColors.push('blue');
                 } else if (adjR > adjG && adjR > adjB && (adjR - Math.max(adjG, adjB) > 15)) {
-                    // True Red ink has a massive difference; Pencil/Black on cardboard does not.
-                    votes.red++;
+                    pointColors.push('red');
                 } else {
-                    votes.black++;
+                    pointColors.push('black');
                 }
             }
 
-            let total = votes.red + votes.green + votes.blue + votes.black;
-            if (total < 2) continue;
+            // Sliding window majority vote to smooth out color noise/artifacts
+            let smoothedColors = [];
+            const WINDOW_SIZE = 7; 
+            for (let j = 0; j < pointColors.length; j++) {
+                let votes = { red: 0, green: 0, blue: 0, black: 0 };
+                for (let w = -WINDOW_SIZE; w <= WINDOW_SIZE; w++) {
+                    let idx = Math.max(0, Math.min(pointColors.length - 1, j + w));
+                    votes[pointColors[idx]]++;
+                }
+                let dom = 'black', mx = votes.black;
+                if (votes.red > mx) { dom = 'red'; mx = votes.red; }
+                if (votes.green > mx) { dom = 'green'; mx = votes.green; }
+                if (votes.blue > mx) { dom = 'blue'; mx = votes.blue; }
+                smoothedColors.push(dom);
+            }
 
-            let dom = 'black', mx = votes.black;
-            if (votes.red > mx) { dom = 'red'; mx = votes.red; }
-            if (votes.green > mx) { dom = 'green'; mx = votes.green; }
-            if (votes.blue > mx) { dom = 'blue'; mx = votes.blue; }
+            // Fracture the path at color boundaries
+            let currentColor = smoothedColors[0];
+            let currentSegment = [evalPoints[0]];
 
-            console.log(`[Ink] Path ${i} (${shape.type}): ${dom} | votes: R=${votes.red} G=${votes.green} B=${votes.blue} K=${votes.black} | samples: ${debugHues.slice(0, 5).join(', ')}`);
+            const pushSegment = (color, segment) => {
+                if (segment.length < 5) return; // Ignore microscopic noise
+                
+                let layer = 'thru_cut';
+                if (color === 'red') layer = 'score';
+                else if (color === 'green') layer = 'crease';
+                
+                // Re-simplify the segment so we don't output thousands of dense evalPoints to SVG
+                let simplified = this._simplifyPath(segment, 1.5);
+                
+                if (shape.type === 'circle') {
+                    // A circle broken by colors must be drawn as paths, not <circle>
+                    results[layer].paths.push({ type: 'path', points: simplified });
+                } else {
+                    results[layer].paths.push({ type: 'path', points: simplified });
+                }
+            };
 
-            if (dom === 'red') results.score.paths.push(shape);
-            else if (dom === 'green') results.crease.paths.push(shape);
-            else results.thru_cut.paths.push(shape);
+            for (let j = 1; j < evalPoints.length; j++) {
+                if (smoothedColors[j] === currentColor) {
+                    currentSegment.push(evalPoints[j]);
+                } else {
+                    pushSegment(currentColor, currentSegment);
+                    currentColor = smoothedColors[j];
+                    currentSegment = [evalPoints[j]]; // Start new segment
+                }
+            }
+            pushSegment(currentColor, currentSegment);
         }
 
         hsv.delete(); gray.delete(); allStrokes.delete();
