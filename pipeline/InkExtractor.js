@@ -45,17 +45,21 @@ class InkExtractor {
         let bH = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), new cv.Scalar(140, 255, 255, 0));
         cv.inRange(hsv, bL, bH, blueMask);
 
-        cv.bitwise_or(redMask1, redMask2, coloredInkMask);
+        let redMask = new cv.Mat();
+        cv.bitwise_or(redMask1, redMask2, redMask);
+        redMask1.delete(); redMask2.delete();
+        
+        cv.bitwise_or(coloredInkMask, redMask, coloredInkMask);
         cv.bitwise_or(coloredInkMask, greenMask, coloredInkMask);
         cv.bitwise_or(coloredInkMask, blueMask, coloredInkMask);
-        redMask1.delete(); redMask2.delete(); greenMask.delete(); blueMask.delete();
+        
         r1L.delete(); r1H.delete(); r2L.delete(); r2H.delete();
         gL.delete(); gH.delete(); bL.delete(); bH.delete();
 
         // STEP 4: Combine dark ink + colored ink
         let allStrokes = new cv.Mat();
         cv.bitwise_or(darkInk, coloredInkMask, allStrokes);
-        darkInk.delete(); coloredInkMask.delete();
+        coloredInkMask.delete();
 
         // Morphological open to kill texture specks
         let openK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
@@ -137,68 +141,44 @@ class InkExtractor {
             if (evalPoints.length < 2) continue;
 
             let votes = { red: 0, green: 0, blue: 0, black: 0 };
-            let debugHues = [];
 
             for (let j = 0; j < evalPoints.length; j++) {
                 let cpx = evalPoints[j][0];
                 let cpy = evalPoints[j][1];
 
-                // Search a 5x5 window but ONLY consider confirmed ink pixels (in allStrokes mask).
-                let bestS = 0, bestH = 0, bestV = 0, bestGv = 255;
-                for (let wy = -2; wy <= 2; wy++) {
-                    for (let wx = -2; wx <= 2; wx++) {
-                        let sx = Math.max(0, Math.min(cpx + wx, hsv.cols - 1));
-                        let sy = Math.max(0, Math.min(cpy + wy, hsv.rows - 1));
-                        if (allStrokes.data[sy * allStrokes.cols + sx] === 0) continue;
-                        let off = (sy * hsv.cols + sx) * 3;
-                        let cg = gray.data[sy * gray.cols + sx];
-
-                        // FIX: Find the DARKEST pixel (core of the ink), not the most saturated!
-                        // Cardboard is highly saturated. Seeking high saturation misses black/green ink
-                        // and forces the sample to the edge of the stroke where it blends into cardboard.
-                        if (cg < bestGv) {
-                            bestGv = cg; bestH = hsv.data[off]; bestS = hsv.data[off + 1]; bestV = hsv.data[off + 2];
-                        }
+                let hitRed = 0, hitGreen = 0, hitBlue = 0, hitBlack = 0;
+                for (let wy = -1; wy <= 1; wy++) {
+                    for (let wx = -1; wx <= 1; wx++) {
+                        let sx = Math.max(0, Math.min(cpx + wx, img.cols - 1));
+                        let sy = Math.max(0, Math.min(cpy + wy, img.rows - 1));
+                        let idx = sy * img.cols + sx;
+                        if (redMask.data[idx]) hitRed++;
+                        if (greenMask.data[idx]) hitGreen++;
+                        if (blueMask.data[idx]) hitBlue++;
+                        if (darkInk.data[idx]) hitBlack++;
                     }
                 }
-                if (bestGv === 255) continue;
-
-                debugHues.push(`H=${bestH} S=${bestS} V=${bestV} gv=${bestGv}`);
-
-                // Classification: use the darkest pixel's hue to determine color.
-                // We relaxed the saturation gate for black ink because black ink often has 
-                // some color noise under varied lighting.
-                if (bestS < 35) {
-                    // Low saturation — achromatic, definitely black ink or shadow
-                    if (bestGv < 130) votes.black++;
-                } else if (bestH < 15 || bestH >= 150) {
-                    votes.red++;
-                } else if (bestH >= 25 && bestH <= 130) {
-                    votes.green++;
-                } else {
-                    // Hue 15-24 is the warm brown cardboard zone.
-                    // Black ink on cardboard assumes this hue, but the cardboard edges also do!
-                    // To ignore the cardboard boundary, enforce that the pixel is very dark (ink).
-                    if (bestGv < 90) votes.black++;
-                }
+                if (hitRed > 0) votes.red++;
+                else if (hitGreen > 0) votes.green++;
+                else if (hitBlue > 0) votes.blue++;
+                else if (hitBlack > 0) votes.black++;
             }
-
-            let total = votes.red + votes.green + votes.blue + votes.black;
-            if (total < 2) continue;
 
             let dom = 'black', mx = votes.black;
             if (votes.red > mx) { dom = 'red'; mx = votes.red; }
             if (votes.green > mx) { dom = 'green'; mx = votes.green; }
             if (votes.blue > mx) { dom = 'blue'; mx = votes.blue; }
 
-            console.log(`[Ink] Path ${i} (${shape.type}): ${dom} | votes: R=${votes.red} G=${votes.green} B=${votes.blue} K=${votes.black} | samples: ${debugHues.slice(0, 5).join(', ')}`);
+            if (mx === 0) continue;
 
             if (dom === 'red') results.score.paths.push(shape);
             else if (dom === 'green') results.crease.paths.push(shape);
-            else results.thru_cut.paths.push(shape);
+            else results.thru_cut.paths.push(shape); // Black and Blue go to thru_cut
         }
 
-        hsv.delete(); gray.delete(); allStrokes.delete();
+        gray.delete(); hsv.delete(); allStrokes.delete();
+        redMask.delete(); greenMask.delete(); blueMask.delete(); darkInk.delete();
+        
         return results;
     }
 
