@@ -49,7 +49,7 @@ class InkExtractor {
         cv.bitwise_or(redMask1, redMask2, redMask);
         redMask1.delete(); redMask2.delete();
         
-        cv.bitwise_or(coloredInkMask, redMask, coloredInkMask);
+        redMask.copyTo(coloredInkMask);
         cv.bitwise_or(coloredInkMask, greenMask, coloredInkMask);
         cv.bitwise_or(coloredInkMask, blueMask, coloredInkMask);
         
