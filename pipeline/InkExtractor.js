@@ -143,45 +143,47 @@ class InkExtractor {
                 let cpx = evalPoints[j][0];
                 let cpy = evalPoints[j][1];
 
-                // Search a 5x5 window but ONLY consider confirmed ink pixels (in allStrokes mask).
-                let bestS = 0, bestH = 0, bestV = 0, bestGv = 255;
+                let bestR = 0, bestG = 0, bestB = 0, bestGv = 255;
                 for (let wy = -2; wy <= 2; wy++) {
                     for (let wx = -2; wx <= 2; wx++) {
-                        let sx = Math.max(0, Math.min(cpx + wx, hsv.cols - 1));
-                        let sy = Math.max(0, Math.min(cpy + wy, hsv.rows - 1));
+                        let sx = Math.max(0, Math.min(cpx + wx, img.cols - 1));
+                        let sy = Math.max(0, Math.min(cpy + wy, img.rows - 1));
                         if (allStrokes.data[sy * allStrokes.cols + sx] === 0) continue;
-                        let off = (sy * hsv.cols + sx) * 3;
                         let cg = gray.data[sy * gray.cols + sx];
 
-                        // FIX: Find the DARKEST pixel (core of the ink), not the most saturated!
-                        // Cardboard is highly saturated. Seeking high saturation misses black/green ink
-                        // and forces the sample to the edge of the stroke where it blends into cardboard.
                         if (cg < bestGv) {
-                            bestGv = cg; bestH = hsv.data[off]; bestS = hsv.data[off + 1]; bestV = hsv.data[off + 2];
+                            bestGv = cg;
+                            let offImg = (sy * img.cols + sx) * 4;
+                            bestR = img.data[offImg];
+                            bestG = img.data[offImg + 1];
+                            bestB = img.data[offImg + 2];
                         }
                     }
                 }
                 if (bestGv === 255) continue;
 
-                debugHues.push(`H=${bestH} S=${bestS} V=${bestV} gv=${bestGv}`);
+                // Adjust RGB to perfectly equalize the warm bias of cardboard & room lighting
+                let adjR = bestR * 1.0;
+                let adjG = bestG * 1.1;
+                let adjB = bestB * 1.3;
 
-                // Robust Classification Model
-                if (bestS < 15) {
-                    // Extremely low saturation: Achromatic (white paper or true black)
-                    if (bestGv < 140) votes.black++;
-                } else if (bestH >= 12 && bestH <= 32) {
-                    // Cardboard Hue Zone (Brown/Yellow). 
-                    // Black ink on cardboard adopts this hue, so we accept it if it's dark.
-                    if (bestGv < 120) votes.black++;
-                } else if (bestH < 12 || bestH > 155) {
-                    // Red and Magenta
-                    votes.red++;
-                } else if (bestH > 32 && bestH <= 90) {
-                    // Green and Yellow-Green
+                debugHues.push(`R=${bestR} G=${bestG} B=${bestB}`);
+
+                // RGB Dominance Classification (Bypasses all HSV shifting artifacts)
+                if (adjG > adjR && adjG > adjB) {
                     votes.green++;
-                } else if (bestH > 90 && bestH <= 155) {
-                    // Blue, Cyan, and Purple
+                } else if (adjB > adjR && adjB > adjG) {
                     votes.blue++;
+                } else if (adjR > adjG && adjR > adjB) {
+                    // It's either Red ink or Black ink (which just darkens the red cardboard).
+                    // True Red ink has a massive difference between Red and the other channels.
+                    if (adjR - Math.max(adjG, adjB) > 25) {
+                        votes.red++;
+                    } else {
+                        votes.black++;
+                    }
+                } else {
+                    votes.black++;
                 }
             }
 
