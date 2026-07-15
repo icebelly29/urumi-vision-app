@@ -40,16 +40,8 @@ class Communicator {
         this._updateStatus('connecting', 'Connecting to Main UI...');
         
         try {
-            // Initialize PeerJS with explicit STUN servers for local network reliability
-            this.peer = new Peer({
-                debug: 2,
-                config: {
-                    'iceServers': [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:global.stun.twilio.com:3478' }
-                    ]
-                }
-            });
+            // Initialize PeerJS
+            this.peer = new Peer({ debug: 2 });
 
             // Set a timeout in case the connection hangs indefinitely
             const connectionTimeout = setTimeout(() => {
