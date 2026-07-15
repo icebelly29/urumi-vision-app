@@ -136,7 +136,7 @@ class InkExtractor {
 
             if (evalPoints.length < 2) continue;
 
-            let votes = { red: 0, green: 0, blue: 0, black: 0 };
+            let pointColors = [];
             let debugHues = [];
 
             for (let j = 0; j < evalPoints.length; j++) {
