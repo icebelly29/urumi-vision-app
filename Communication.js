@@ -70,7 +70,9 @@ class Communicator {
 
     _connectToMainUi() {
         console.log('Initiating connection to Main UI:', this.mainUiPeerId);
-        this.conn = this.peer.connect(this.mainUiPeerId);
+        this.conn = this.peer.connect(this.mainUiPeerId, {
+            reliable: true
+        });
 
         // Set a timeout for the actual P2P connection
         const p2pTimeout = setTimeout(() => {
