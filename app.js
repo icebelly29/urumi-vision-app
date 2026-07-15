@@ -104,6 +104,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         communicator.sendPayload(result.svg, result.image, result.meta);
 
+                        // MOCK LOCAL STORAGE BRIDGE: 
+                        // If testing on the exact same computer/browser, WebRTC loopback often fails.
+                        // This instantly bridges the data to the test_receiver tab without WebRTC.
+                        try {
+                            localStorage.setItem('urumi_payload', JSON.stringify({
+                                type: 'PROCESSING_COMPLETE',
+                                payload: {
+                                    svg: result.svg,
+                                    image: result.image,
+                                    dots_per_mm: result.meta?.dots_per_mm,
+                                    physical_width: result.meta?.physical_width,
+                                    physical_height: result.meta?.physical_height
+                                }
+                            }));
+                            // Trigger storage event for same-window if needed (storage event normally only fires on other tabs)
+                            localStorage.removeItem('urumi_payload');
+                        } catch (e) {
+                            console.warn("LocalStorage bridge full or disabled.");
+                        }
+
                         progressFill.style.width = '100%';
                         showSuccess("Processed Image sent successfully.", result.image);
                     } catch (err) {
