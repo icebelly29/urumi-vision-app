@@ -40,8 +40,16 @@ class Communicator {
         this._updateStatus('connecting', 'Connecting to Main UI...');
         
         try {
-            // Initialize PeerJS
-            this.peer = new Peer();
+            // Initialize PeerJS with explicit STUN servers for local network reliability
+            this.peer = new Peer({
+                debug: 2,
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:global.stun.twilio.com:3478' }
+                    ]
+                }
+            });
 
             // Set a timeout in case the connection hangs indefinitely
             const connectionTimeout = setTimeout(() => {
@@ -69,9 +77,8 @@ class Communicator {
     }
 
     _connectToMainUi() {
-        this.conn = this.peer.connect(this.mainUiPeerId, {
-            reliable: true
-        });
+        console.log('Initiating connection to Main UI:', this.mainUiPeerId);
+        this.conn = this.peer.connect(this.mainUiPeerId);
 
         // Set a timeout for the actual P2P connection
         const p2pTimeout = setTimeout(() => {
