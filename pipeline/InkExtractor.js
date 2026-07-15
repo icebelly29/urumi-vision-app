@@ -190,7 +190,7 @@ class InkExtractor {
                 // RGB Dominance Classification with noise margins
                 if (adjG > adjR && adjG > adjB && (adjG - Math.max(adjR, adjB) > 4)) {
                     pointColors.push('green');
-                } else if (adjB > adjR && adjB > adjG && (adjB - Math.max(adjR, adjG) > 4)) {
+                } else if (adjB > adjR && adjB > adjG && (adjB - Math.max(adjR, adjG) > 12)) {
                     pointColors.push('blue');
                 } else if (adjR > adjG && adjR > adjB && (adjR - Math.max(adjG, adjB) > 15)) {
                     pointColors.push('red');
