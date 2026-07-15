@@ -1,61 +1,49 @@
-# Urumi Vision App & Magic Pen Pipeline
+# Urumi Vision App
 
-A high-performance vision processing application designed for a 113x83cm ArUco-based cutting bed. It leverages OpenCV.js and WebRTC (PeerJS) to capture images, correct perspective distortion, extract multi-colored hand-drawn ink strokes, and generate layered SVG files ready for CNC/G-code translation.
+A high-performance vision processing application designed for a 113x83cm ArUco-based cutting bed. It leverages OpenCV.js and WebRTC (PeerJS) to capture images, correct perspective distortion, extract handwritten ink strokes, and generate layered SVG files ready for CNC/G-code translation.
 
-## Core Capabilities
+## Features
 
-- **ArUco Marker Detection:** Automatically detects markers at the corners of the cutting bed and applies homography to flatten the image.
-- **Intelligent Ink Extraction:** Robustly separates ink from cardboard backgrounds, despite intense shadows and lighting gradients.
-- **Dynamic Geometric Snapping:** Converts hand-drawn circles and rectangles into precise geometric SVG elements.
-- **Multi-Color Segmentation:** Skeletons are mathematically fractured at color boundaries, allowing users to draw complex, intersecting shapes with multiple pens.
-- **Layered CNC Output:** Generates a 1:1 scale millimeter-accurate SVG with distinct layers mapped to specific CNC operations.
+- **ArUco Marker Detection & Perspective Warping:** Automatically detects ArUco markers at the corners of the cutting bed and applies perspective correction to flatten the image.
+- **Dynamic Bed Frame Support:** Supports dynamic coordinate mapping based on URL parameters or JSON configuration, effectively cropping out checkerboard borders.
+- **Color-Based Stroke Extraction:** Uses blackhat morphology and HSV saturation to accurately extract and separate red, green, and blue/black ink.
+- **Geometric Snapping:** Converts hand-drawn circles and polygons into precise geometric SVG elements.
+- **Path Smoothing & Simplification:** Uses Douglas-Peucker simplification and iterative Gaussian smoothing to optimize paths for CNC machines while reducing G-code bloat.
+- **Layered SVG Generation:** Outputs a 1:1 scale millimeter-accurate SVG with distinct layers for `thru_cut`, `score`, and `crease`.
+- **WebRTC Integration:** Directly streams processing results to a desktop receiver UI via PeerJS.
 
----
+## Project Architecture
 
-## Project Architecture & Pipeline
+The core image processing logic has been modularized into a dedicated pipeline for better maintainability:
 
-The core computer vision logic is modularized into three primary engines located in the `/pipeline/` directory.
+- `index.html` - The main mobile-facing UI for capturing or uploading images.
+- `app.js` - Handles UI interactions, file uploading, and initiates processing.
+- `Communication.js` - Manages the PeerJS connection to send data to the desktop receiver.
+- `test_receiver.html` - A test desktop receiver UI to view the generated SVGs.
+- `ImageProcessor.js` - Orchestrator for the vision pipeline.
 
-### 1. Warp Engine (`WarpEngine.js`)
-- **Marker Detection:** Utilizes OpenCV's ArUco module to detect the four corner markers defining the physical boundary of the cutting bed.
-- **Perspective Correction:** Calculates a transformation matrix (`cv.getPerspectiveTransform`) and warps the skewed camera image (`cv.warpPerspective`) into a perfectly flat, top-down projection scaled exactly to the physical bed dimensions.
+### Pipeline Modules (`/pipeline/`)
 
-### 2. Ink Extraction & Vectorization (`InkExtractor.js`)
-This module is the heart of the "Magic Pen" feature, employing advanced computer vision techniques to convert messy analog drawings into crisp digital vectors.
+1. **`WarpEngine.js`**
+   - Handles the OpenCV ArUco dictionary initialization and detection.
+   - Calculates the target bounding box and perspective transform matrix.
+   - Outputs the flattened and cropped `cv.Mat` image.
 
-* **Mask Generation:** Uses bilateral filtering and blackhat morphology to isolate ink from the textured cardboard background.
-* **Geometric Feature Extraction:** 
-  - Extracts contours (`cv.findContours`) and analyzes shape solidity and circularity (`cv.convexHull`).
-  - Snaps high-solidity structures into perfect geometric polygons (`cv.approxPolyDP`) and circles.
-  - **Edge Shattering:** Multi-vertex polygons are dynamically shattered into discrete, independent line segments. This allows a single closed geometric shape to have different colors on different sides.
-* **Skeletonization (`TraceSkeleton`):** 
-  - For non-geometric hand-drawn strokes, the mask is thinned down to a precise 1-pixel centerline using a Zhang-Suen thinning algorithm.
-  - This prevents double-line tracing and minimizes G-code bloat.
-* **Path Smoothing:** Applies the Douglas-Peucker simplification algorithm to optimize nodes for CNC machines, preserving sharp corners while removing hand-jitter.
+2. **`InkExtractor.js`**
+   - Core extraction logic using bilateral filtering and blackhat morphology.
+   - Isolates the ink from the background paper.
+   - Detects contours, simplifies them, and applies skeletonization (`TraceSkeleton`).
+   - Uses a dynamic point-by-point evaluation and sliding-window majority vote to shatter intersecting skeletons at color boundaries.
+   - Employs a hybrid Raw/Von-Kries color classification model to handle lighting gradients and eliminate camera noise-floor bloat.
 
-### 3. Advanced Color Classification Engine
-The color classification logic in `InkExtractor.js` was custom-built to solve extreme environmental challenges (shadows, cardboard hue, camera noise, and intersecting colors).
+3. **`SvgGenerator.js`**
+   - Takes the extracted paths and shapes to assemble a valid XML SVG string.
+   - Ensures correct physical dimensions and millimeter-to-pixel ratios.
+   - Organizes elements by CNC operations (`layer_bed_frame`, `thru_cut`, `score`, `crease`).
 
-* **Point-by-Point Path Fracturing:** 
-  Standard skeletonization blindly groups touching strokes into a single continuous path. To support intersecting multi-color lines, our engine casts a localized 3x3 search window at every point along the skeleton to sample the darkest ink core. It applies a sliding-window majority vote (to eliminate micro-noise) and actively fractures the vector path wherever a color transition occurs.
-* **Local Von Kries White Balancing:** 
-  Global color thresholds fail under uneven lighting. Instead, the algorithm dynamically samples the cardboard background locally for every pixel. It applies a localized Von Kries multiplier to neutralize lighting gradients and the cardboard's inherent yellow tint before evaluating the ink.
-* **Hybrid Color Dominance Model:** 
-  - *Red vs. Black:* Uses the Von Kries-adjusted RGB ratios. Since black ink on yellow cardboard naturally registers as red to a camera, this white-balancing step is strictly required to distinguish true red ink from black ink.
-  - *Green vs. Blue:* Uses **raw** sensor RGB dominance. This hybrid bypass intentionally skips Von Kries for the blue/green spectrum because smartphone cameras have high noise floors in the blue channel under low light. Multiplying that noise floor artificially causes dark green ink to bloom and falsely classify as blue.
-* **Cross-Contamination Prevention:** The sampling window is tightly restricted to 3x3 pixels to prevent the algorithm from accidentally sampling adjacent, unconnected ink strokes (e.g., a blue tick mark drawn millimeters away from a green line).
+## Usage & Setup
 
-### 4. SVG Generation (`SvgGenerator.js`)
-- Takes the fully classified and fractured vector segments and assemblies a valid XML SVG string.
-- Automatically maps colors to their designated CNC operations:
-  - **Red Ink** ➔ `score`
-  - **Green Ink** ➔ `crease`
-  - **Blue / Black Ink** ➔ `thru_cut`
-- Outputs paths that are scaled perfectly to physical millimeters (e.g., 1 SVG unit = 1 mm) for seamless CAM integration.
-
----
-
-## Usage & Local Development
+### 1. Local Development
 
 You can serve this directory using any static file server.
 
@@ -63,11 +51,40 @@ You can serve this directory using any static file server.
 # Using Python
 python -m http.server 5500
 
-# Using Node.js
+# Using Node.js (http-server)
 npx http-server -p 5500
 ```
 
-1. Open `http://localhost:5500/test_receiver.html` on your desktop to launch the receiver UI.
-2. Scan the QR code or open the URL on your mobile device (devices must be on the same network).
-3. Tap the capture button on your phone, line up the ArUco bed, and upload.
-4. The processed, CNC-ready SVG will instantly appear on your desktop receiver via PeerJS WebRTC.
+### 2. Testing the Pipeline
+
+1. Open `http://localhost:5500/test_receiver.html` on your desktop.
+2. A QR code and URL will appear.
+3. Open the URL on your mobile device (must be on the same network or use a tunnel like Ngrok).
+4. Tap the capture button on your phone and upload a photo of the cutting bed.
+5. The processed SVG and image will appear on your desktop receiver.
+
+## Technical Details
+
+- **Dependencies:** OpenCV.js (v4.8.0), PeerJS (v1.3.2), Lucide Icons.
+- **Coordinate System:** The resulting SVG maps 1 SVG unit to 1 physical millimeter.
+- **Ink Classification:** 
+  - Red (Score)
+  - Green (Crease)
+  - Blue/Black (Thru-cut)
+
+## Deep Dive: Magic Pen Vision Algorithms
+
+Over the course of the project, we encountered and solved numerous complex physical and environmental issues inherent in smartphone-based computer vision. To ensure 100% vector accuracy for CNC routing, the `InkExtractor.js` engine relies on several advanced algorithms:
+
+### 1. Dynamic Edge Shattering (Geometric Snapping)
+Standard geometric detection (like `cv.approxPolyDP`) forces closed hand-drawn loops into a monolithic polygon (e.g., a perfect square). Because SVG polygons only support a single stroke color, drawing a square with 4 different colored pens would cause the entire shape to inherit the dominant color.
+* **The Solution:** We explicitly "shatter" all mathematically extracted polygons into discrete 2-point line segments (`<polyline>`). This allows a single snapped geometric square to preserve the unique colors of each of its physical edges.
+
+### 2. Point-by-Point Path Fracturing
+When the pipeline falls back to `TraceSkeleton` for non-geometric, messy lines, Zhang-Suen skeletonization inherently groups intersecting strokes into a single continuous path. Previously, assigning a single color to an entire path caused minority colors to be swallowed if a blue line intersected a red line.
+* **The Solution:** The engine evaluates the color at every single pixel along the skeletonized line. It uses a **3x3 dark-pixel search window** to find the ink core, preventing cross-contamination from adjacent strokes. It then applies a **7-point sliding-window majority vote** to eliminate camera noise. When the algorithm detects a true shift in color, it dynamically fractures the SVG path in half exactly at the color boundary.
+
+### 3. Hybrid Color Dominance Model
+Distinguishing dark ink on a yellow cardboard bed under uneven lighting proved highly challenging.
+* **Red vs. Black (Von Kries White Balance):** Because yellow cardboard reflects high amounts of red and green light, neutral black ink naturally reads as "Red" to a camera sensor. To solve this, the pipeline samples the localized background and applies a **Von Kries White Balance multiplier** to artificially neutralize the cardboard's yellow tint, allowing the algorithm to mathematically differentiate true Red ink from Black ink.
+* **Green vs. Blue (Raw Dominance):** Smartphone cameras have notoriously high noise floors in the blue channel in low light. Multiplying that noise floor by the Von Kries multiplier artificially inflated the blue channel, causing dark green ink to register as blue. To solve this, the pipeline bypasses the Von Kries multiplier for the green/blue spectrum and strictly evaluates the **Raw Sensor RGB**. Since raw green ink is physically greener than it is blue, it easily overrides the camera's blue noise floor.
