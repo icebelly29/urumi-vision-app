@@ -306,10 +306,14 @@ class InkExtractor {
                         perfectShapes.push({ type: 'circle', cx: circle.center.x, cy: circle.center.y, r: circle.radius });
                         isGeometric = true;
                     } else if (vertices >= 3 && vertices <= 8) {
-                        let pts = [];
-                        for (let j = 0; j < vertices; j++) pts.push([approx.data32S[j * 2], approx.data32S[j * 2 + 1]]);
-                        pts.push([...pts[0]]);
-                        perfectShapes.push({ type: 'polygon', points: pts });
+                        for (let j = 0; j < vertices; j++) {
+                            let p1 = [approx.data32S[j * 2], approx.data32S[j * 2 + 1]];
+                            let p2 = (j === vertices - 1) 
+                                ? [approx.data32S[0], approx.data32S[1]] 
+                                : [approx.data32S[(j + 1) * 2], approx.data32S[(j + 1) * 2 + 1]];
+                            
+                            perfectShapes.push({ type: 'path', points: [p1, p2] });
+                        }
                         isGeometric = true;
                     }
                     approx.delete();
