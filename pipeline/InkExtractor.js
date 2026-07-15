@@ -187,10 +187,18 @@ class InkExtractor {
 
                 debugHues.push(`aR=${adjR.toFixed(0)} aG=${adjG.toFixed(0)} aB=${adjB.toFixed(0)}`);
 
-                // RGB Dominance Classification with noise margins
-                if (adjG > adjR && adjG > adjB && (adjG - Math.max(adjR, adjB) > 4)) {
+                // Hybrid Classification:
+                // Cardboard is yellowish (high R, med G, low B). 
+                // Black ink will naturally have raw R > G > B, so raw dominance falsely classifies Black as Red. 
+                // We MUST use Von Kries `adjR` to correctly distinguish true Red from Black.
+                // However, dark Green ink absorbs heavily, and the camera noise floor artificially inflates raw Blue.
+                // Von Kries `multB` (e.g. 1.4x) explodes this blue noise, causing dark Green ink to falsely vote Blue.
+                // Since Black ink inherently has raw G > B (because cardboard has G > B), 
+                // we can safely use RAW G and RAW B to distinguish Green and Blue from Black without false positives!
+                
+                if (bestG > bestR && bestG > bestB && (bestG - Math.max(bestR, bestB) > 2)) {
                     pointColors.push('green');
-                } else if (adjB > adjR && adjB > adjG && (adjB - Math.max(adjR, adjG) > 12)) {
+                } else if (bestB > bestG && bestB > bestR && (bestB - Math.max(bestR, bestG) > 5)) {
                     pointColors.push('blue');
                 } else if (adjR > adjG && adjR > adjB && (adjR - Math.max(adjG, adjB) > 15)) {
                     pointColors.push('red');
