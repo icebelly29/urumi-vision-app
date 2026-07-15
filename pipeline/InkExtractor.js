@@ -17,11 +17,11 @@ class InkExtractor {
         cv.adaptiveThreshold(blurred, adaptiveMask, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 51, 10);
         blurred.delete();
 
-        // STEP 2: Absolute darkness gate — only keep pixels with gray < 90.
-        // Cardboard edges are gray ~100-120, so this kills them.
-        // Colored ink lighter than 90 is caught by the color masks in STEP 3.
+        // STEP 2: Absolute darkness gate — only keep pixels with gray < 120.
+        // The Lasso tool now handles workpiece edges, so we can be more permissive
+        // to ensure black ink on white paper isn't fragmented.
         let darkGate = new cv.Mat();
-        cv.threshold(gray, darkGate, 90, 255, cv.THRESH_BINARY_INV);
+        cv.threshold(gray, darkGate, 120, 255, cv.THRESH_BINARY_INV);
         let darkInk = new cv.Mat();
         cv.bitwise_and(adaptiveMask, darkGate, darkInk);
         adaptiveMask.delete(); darkGate.delete();
@@ -166,11 +166,11 @@ class InkExtractor {
                 debugHues.push(`H=${bestH} S=${bestS} V=${bestV} gv=${bestGv}`);
 
                 // Classification: use the darkest pixel's hue to determine color.
-                // No saturation gate on color — on cardboard the darkest pixel can
-                // have low saturation even for colored ink. Hue alone is reliable.
-                if (bestS < 15) {
-                    // Very low saturation — achromatic, definitely black ink or shadow
-                    if (bestGv < 90) votes.black++;
+                // We relaxed the saturation gate for black ink because black ink often has 
+                // some color noise under varied lighting.
+                if (bestS < 35) {
+                    // Low saturation — achromatic, definitely black ink or shadow
+                    if (bestGv < 130) votes.black++;
                 } else if (bestH < 15 || bestH >= 150) {
                     votes.red++;
                 } else if (bestH >= 25 && bestH <= 130) {
