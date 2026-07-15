@@ -144,8 +144,8 @@ class InkExtractor {
                 let cpy = evalPoints[j][1];
 
                 let bestR = 0, bestG = 0, bestB = 0, bestGv = 255;
-                for (let wy = -2; wy <= 2; wy++) {
-                    for (let wx = -2; wx <= 2; wx++) {
+                for (let wy = -1; wy <= 1; wy++) {
+                    for (let wx = -1; wx <= 1; wx++) {
                         let sx = Math.max(0, Math.min(cpx + wx, img.cols - 1));
                         let sy = Math.max(0, Math.min(cpy + wy, img.rows - 1));
                         if (allStrokes.data[sy * allStrokes.cols + sx] === 0) continue;
