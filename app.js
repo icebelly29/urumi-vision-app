@@ -13,7 +13,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusTitle = document.getElementById('statusTitle');
     const statusMessage = document.getElementById('statusMessage');
     const previewImg = document.getElementById('previewImg');
+    const previewContainer = document.getElementById('previewContainer');
+    const svgOverlay = document.getElementById('svgOverlay');
+    const btnOverlayTest = document.getElementById('btnOverlayTest');
     const canvas = document.getElementById('canvas');
+
+    let overlayActive = false;
+    let currentSvgData = null;
+
+    btnOverlayTest.addEventListener('click', () => {
+        overlayActive = !overlayActive;
+        if (overlayActive) {
+            previewImg.style.opacity = '0.5';
+            svgOverlay.style.display = 'block';
+            svgOverlay.innerHTML = currentSvgData;
+            
+            const svgEl = svgOverlay.querySelector('svg');
+            if (svgEl) {
+                svgEl.style.width = '100%';
+                svgEl.style.height = '100%';
+                svgEl.style.position = 'absolute';
+                svgEl.style.top = '0';
+                svgEl.style.left = '0';
+            }
+        } else {
+            previewImg.style.opacity = '1';
+            svgOverlay.style.display = 'none';
+            svgOverlay.innerHTML = '';
+        }
+    });
 
     let opencvReady = false;
     let processor = new ImageProcessor();
@@ -58,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset UI
         statusCard.className = 'status-card';
         statusCard.style.display = 'none';
-        previewImg.style.display = 'none';
+        previewContainer.style.display = 'none';
         progressContainer.style.display = 'block';
         progressFill.style.width = '30%';
         progressStatus.innerHTML = '<i data-lucide="loader-2" class="animate-spin" style="width:14px; height:14px; vertical-align:middle; margin-right:4px;"></i> Reading file...';
@@ -75,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 communicator.sendPayload(svgText, null);
                 
                 progressFill.style.width = '100%';
-                showSuccess("Direct SVG sent successfully to Main UI.");
+                showSuccess("Direct SVG sent successfully to Main UI.", null, svgText);
             } 
             // Handle Image Processing (JPG/PNG/Camera)
             else if (file.type.startsWith('image/')) {
@@ -154,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             progressFill.style.width = '100%';
-            showSuccess("Processed Image sent successfully.", result.image);
+            showSuccess("Processed Image sent successfully.", result.image, result.svg);
         } catch (err) {
             showError("Processing failed: " + err.message);
         }
@@ -328,19 +356,32 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function showSuccess(msg, imageUrl = null) {
+    function showSuccess(msg, imageUrl = null, svgData = null) {
         progressContainer.style.display = 'none';
         statusCard.className = 'status-card success';
         statusCard.style.display = 'block';
         statusTitle.innerHTML = '<span><i data-lucide="check-circle"></i></span> Sent Successfully!';
         statusMessage.innerText = msg;
         
+        currentSvgData = svgData;
+        overlayActive = false;
+        previewImg.style.opacity = '1';
+        svgOverlay.style.display = 'none';
+        svgOverlay.innerHTML = '';
+        
         if (imageUrl) {
             previewImg.src = imageUrl;
-            previewImg.style.display = 'block';
+            previewContainer.style.display = 'block';
         } else {
-            previewImg.style.display = 'none';
+            previewContainer.style.display = 'none';
         }
+
+        if (imageUrl && svgData) {
+            btnOverlayTest.style.display = 'inline-block';
+        } else {
+            btnOverlayTest.style.display = 'none';
+        }
+
         lucide.createIcons();
     }
 
@@ -350,7 +391,8 @@ document.addEventListener('DOMContentLoaded', () => {
         statusCard.style.display = 'block';
         statusTitle.innerHTML = '<span><i data-lucide="alert-triangle"></i></span> Error';
         statusMessage.innerText = msg;
-        previewImg.style.display = 'none';
+        previewContainer.style.display = 'none';
+        btnOverlayTest.style.display = 'none';
         lucide.createIcons();
     }
 });

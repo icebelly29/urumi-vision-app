@@ -1,156 +1,249 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Main UI Receiver (Test)</title>
     <style>
-        body { font-family: sans-serif; padding: 2rem; background: #f0f0f0; margin: 0; }
-        .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 95vw; max-width: 95vw; margin: 0 auto; text-align: center; box-sizing: border-box; }
-        #qr-link { display: inline-block; padding: 1rem 2rem; background: #3B82F6; color: white; text-decoration: none; border-radius: 4px; font-weight: bold; margin-top: 1rem; }
-        .data-box { background: #1e1e1e; color: #00ff00; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-family: monospace; max-height: 300px; overflow-y: auto; text-align: left; }
-        .preview { max-width: 100%; border: 1px solid #ccc; margin-top: 1rem; text-align: center; }
-        #qr-code { margin-top: 1.5rem; border: 4px solid white; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); display: none; margin-left: auto; margin-right: auto; }
-        .mobile-url { margin-top: 1rem; font-family: monospace; background: #eee; padding: 8px; border-radius: 4px; word-break: break-all; }
+        body {
+            font-family: sans-serif;
+            padding: 2rem;
+            background: #f0f0f0;
+            margin: 0;
+        }
+
+        .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 95vw;
+            max-width: 95vw;
+            margin: 0 auto;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        #qr-link {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background: #3B82F6;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-top: 1rem;
+        }
+
+        .data-box {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        .preview {
+            max-width: 100%;
+            border: 1px solid #ccc;
+            margin-top: 1rem;
+            text-align: center;
+        }
+
+        #qr-code {
+            margin-top: 1.5rem;
+            border: 4px solid white;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+            display: none;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .mobile-url {
+            margin-top: 1rem;
+            font-family: monospace;
+            background: #eee;
+            padding: 8px;
+            border-radius: 4px;
+            word-break: break-all;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.2/dist/peerjs.min.js"></script>
 </head>
+
 <body>
 
-<div class="card">
-    <h1>WebRTC Receiver Test</h1>
-    <p>Status: <strong id="status" style="color: orange;">Initializing...</strong></p>
-    
-    <div id="link-container" style="display: none;">
-        <p><strong>Scan this QR code with your phone camera:</strong></p>
-        <img id="qr-code" alt="QR Code" />
-        <p>Or manually type this into your phone browser:</p>
-        <div class="mobile-url" id="mobile-url-text"></div>
-        <a id="qr-link" href="#" target="_blank">Open on Desktop Instead</a>
-    </div>
+    <div class="card">
+        <h1>WebRTC Receiver Test</h1>
+        <p>Status: <strong id="status" style="color: orange;">Initializing...</strong></p>
 
-    <hr style="margin: 2rem 0;">
+        <div id="link-container" style="display: none;">
+            <p><strong>Scan this QR code with your phone camera:</strong></p>
+            <img id="qr-code" alt="QR Code" />
+            <p>Or manually type this into your phone browser:</p>
+            <div class="mobile-url" id="mobile-url-text"></div>
+            <a id="qr-link" href="#" target="_blank">Open on Desktop Instead</a>
+        </div>
 
-    <div style="text-align: left;">
-        <h2>Received Data</h2>
-        <div id="results" style="display: none;">
-            <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 300px;">
-                    <h3>Processed Image</h3>
-                    <img id="result-img" class="preview" alt="Result from mobile" style="width: 100%; height: auto; box-sizing: border-box;" />
+        <hr style="margin: 2rem 0;">
+
+        <div style="text-align: left;">
+            <h2>Received Data</h2>
+            <div id="results" style="display: none;">
+                <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;">
+                        <h3>Processed Image</h3>
+                        <img id="result-img" class="preview" alt="Result from mobile"
+                            style="width: 100%; height: auto; box-sizing: border-box;" />
+                    </div>
+
+                    <div style="flex: 1; min-width: 300px;">
+                        <h3>Generated Layered SVG</h3>
+                        <div id="svg-render-area" class="preview"
+                            style="background: white; padding: 1rem; width: 100%; height: auto; box-sizing: border-box;">
+                        </div>
+                    </div>
                 </div>
-                
-                <div style="flex: 1; min-width: 300px;">
-                    <h3>Generated Layered SVG</h3>
-                    <div id="svg-render-area" class="preview" style="background: white; padding: 1rem; width: 100%; height: auto; box-sizing: border-box;"></div>
+
+                <div style="margin-top: 2rem;">
+                    <h3>Overlay View (SVG on Image)</h3>
+                    <div class="preview"
+                        style="position: relative; width: 100%; max-width: 800px; margin: 0 auto; box-sizing: border-box; background: white; padding: 0;">
+                        <style>
+                            #overlay-svg svg {
+                                width: 100% !important;
+                                height: 100% !important;
+                            }
+                        </style>
+                        <img id="overlay-img" style="width: 100%; height: auto; opacity: 0.75; display: block;"
+                            alt="Background image for overlay" />
+                        <div id="overlay-svg"
+                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
+                        </div>
+                    </div>
                 </div>
+
+                <h4 style="margin-top: 2rem;">Raw SVG Code</h4>
+                <div id="result-svg" class="data-box"></div>
             </div>
-            
-            <h4 style="margin-top: 2rem;">Raw SVG Code</h4>
-            <div id="result-svg" class="data-box"></div>
         </div>
     </div>
-</div>
 
-<script>
-    // Local IP address detected
-    const LOCAL_IP = '192.168.33.106';
+    <script>
+        // Local IP address detected
+        const LOCAL_IP = '192.168.33.106';
 
-    // Changed ID to bypass the server lock instantly!
-    const peer = new Peer('main-ui-test-77777'); 
-    const statusEl = document.getElementById('status');
-    const linkContainer = document.getElementById('link-container');
-    const qrLink = document.getElementById('qr-link');
-    const qrCode = document.getElementById('qr-code');
-    const mobileUrlText = document.getElementById('mobile-url-text');
-    const results = document.getElementById('results');
+        // Changed ID to bypass the server lock instantly!
+        const peer = new Peer('main-ui-test-77777');
+        const statusEl = document.getElementById('status');
+        const linkContainer = document.getElementById('link-container');
+        const qrLink = document.getElementById('qr-link');
+        const qrCode = document.getElementById('qr-code');
+        const mobileUrlText = document.getElementById('mobile-url-text');
+        const results = document.getElementById('results');
 
-    peer.on('open', (id) => {
-        statusEl.textContent = 'Listening for connections on ID: ' + id;
-        statusEl.style.color = 'blue';
+        peer.on('open', (id) => {
+            statusEl.textContent = 'Listening for connections on ID: ' + id;
+            statusEl.style.color = 'blue';
 
-        // Construct the URL dynamically based on where test_receiver is hosted
-        const currentOrigin = window.location.origin; // e.g. http://127.0.0.1:5500
-        const pathname = window.location.pathname.replace('test_receiver.html', 'index.html');
-        
-        // For the desktop clickable link, keep it on the exact same origin (localhost)
-        const desktopUrl = `${currentOrigin}${pathname}?peerId=${id}`;
-        qrLink.href = desktopUrl;
-        
-        // For the QR code (phone), try to swap localhost for the hardcoded network IP 
-        // if they are on localhost, otherwise just use the current origin.
-        let mobileUrl = desktopUrl;
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-            mobileUrl = `http://${LOCAL_IP}:${window.location.port}${pathname}?peerId=${id}`;
-        }
-        
-        mobileUrlText.textContent = mobileUrl;
-        
-        // Generate QR Code using free API
-        qrCode.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(mobileUrl)}`;
-        qrCode.style.display = 'block';
-        
-        linkContainer.style.display = 'block';
-    });
+            // Construct the URL dynamically based on where test_receiver is hosted
+            const currentOrigin = window.location.origin; // e.g. http://127.0.0.1:5500
+            const pathname = window.location.pathname.replace('test_receiver.html', 'index.html');
 
-    peer.on('connection', (conn) => {
-        statusEl.textContent = 'Mobile Device Connected!';
-        statusEl.style.color = 'green';
-        linkContainer.style.display = 'none';
+            // For the desktop clickable link, keep it on the exact same origin (localhost)
+            const desktopUrl = `${currentOrigin}${pathname}?peerId=${id}`;
+            qrLink.href = desktopUrl;
 
-        conn.on('data', (data) => {
-            if (data.type === 'MOBILE_APP_READY') {
-                statusEl.textContent = 'Mobile Device Ready. Waiting for file upload...';
+            // For the QR code (phone), try to swap localhost for the hardcoded network IP 
+            // if they are on localhost, otherwise just use the current origin.
+            let mobileUrl = desktopUrl;
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                mobileUrl = `http://${LOCAL_IP}:${window.location.port}${pathname}?peerId=${id}`;
             }
-            else if (data.type === 'PROCESSING_COMPLETE') {
-                statusEl.textContent = 'Payload Received Successfully!';
-                results.style.display = 'block';
-                
-                if(data.payload.image) {
-                    document.getElementById('result-img').src = data.payload.image;
-                    document.getElementById('result-img').style.display = 'inline-block';
-                } else {
-                    document.getElementById('result-img').style.display = 'none';
-                }
-                
-                document.getElementById('result-svg').textContent = data.payload.svg;
-                document.getElementById('svg-render-area').innerHTML = data.payload.svg;
-            }
+
+            mobileUrlText.textContent = mobileUrl;
+
+            // Generate QR Code using free API
+            qrCode.src = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(mobileUrl)}`;
+            qrCode.style.display = 'block';
+
+            linkContainer.style.display = 'block';
         });
-    });
 
-    peer.on('error', (err) => {
-        statusEl.textContent = 'Error: ' + err.message;
-        statusEl.style.color = 'red';
-    });
+        peer.on('connection', (conn) => {
+            statusEl.textContent = 'Mobile Device Connected!';
+            statusEl.style.color = 'green';
+            linkContainer.style.display = 'none';
 
-    // MOCK LOCAL STORAGE BRIDGE:
-    // Listens for local browser payload bridging to bypass WebRTC loopback failures.
-    window.addEventListener('storage', (e) => {
-        if (e.key === 'urumi_payload' && e.newValue) {
-            try {
-                const data = JSON.parse(e.newValue);
-                if (data.type === 'PROCESSING_COMPLETE') {
-                    statusEl.textContent = 'Payload Received via Local Bridge!';
-                    statusEl.style.color = 'green';
+            conn.on('data', (data) => {
+                if (data.type === 'MOBILE_APP_READY') {
+                    statusEl.textContent = 'Mobile Device Ready. Waiting for file upload...';
+                }
+                else if (data.type === 'PROCESSING_COMPLETE') {
+                    statusEl.textContent = 'Payload Received Successfully!';
                     results.style.display = 'block';
-                    
-                    if(data.payload.image) {
+
+                    if (data.payload.image) {
                         document.getElementById('result-img').src = data.payload.image;
                         document.getElementById('result-img').style.display = 'inline-block';
+                        document.getElementById('overlay-img').src = data.payload.image;
+                        document.getElementById('overlay-img').style.display = 'block';
                     } else {
                         document.getElementById('result-img').style.display = 'none';
+                        document.getElementById('overlay-img').style.display = 'none';
                     }
-                    
+
                     document.getElementById('result-svg').textContent = data.payload.svg;
                     document.getElementById('svg-render-area').innerHTML = data.payload.svg;
+                    document.getElementById('overlay-svg').innerHTML = data.payload.svg;
                 }
-            } catch (err) {
-                console.error("Local storage bridge parse error:", err);
+            });
+        });
+
+        peer.on('error', (err) => {
+            statusEl.textContent = 'Error: ' + err.message;
+            statusEl.style.color = 'red';
+        });
+
+        // MOCK LOCAL STORAGE BRIDGE:
+        // Listens for local browser payload bridging to bypass WebRTC loopback failures.
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'urumi_payload' && e.newValue) {
+                try {
+                    const data = JSON.parse(e.newValue);
+                    if (data.type === 'PROCESSING_COMPLETE') {
+                        statusEl.textContent = 'Payload Received via Local Bridge!';
+                        statusEl.style.color = 'green';
+                        results.style.display = 'block';
+
+                        if (data.payload.image) {
+                            document.getElementById('result-img').src = data.payload.image;
+                            document.getElementById('result-img').style.display = 'inline-block';
+                            document.getElementById('overlay-img').src = data.payload.image;
+                            document.getElementById('overlay-img').style.display = 'block';
+                        } else {
+                            document.getElementById('result-img').style.display = 'none';
+                            document.getElementById('overlay-img').style.display = 'none';
+                        }
+
+                        document.getElementById('result-svg').textContent = data.payload.svg;
+                        document.getElementById('svg-render-area').innerHTML = data.payload.svg;
+                        document.getElementById('overlay-svg').innerHTML = data.payload.svg;
+                    }
+                } catch (err) {
+                    console.error("Local storage bridge parse error:", err);
+                }
             }
-        }
-    });
-</script>
+        });
+    </script>
 
 </body>
+
 </html>
