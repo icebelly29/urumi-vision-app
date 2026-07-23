@@ -1,0 +1,28 @@
+{
+  "name": "svg-skeletonization",
+  "version": "1.0.1",
+  "description": "",
+  "main": "dist/svg-skeletonization.umd.js",
+  "module": "dist/svg-skeletonization.es.js",
+  "exports": {
+    ".": {
+      "import": "./dist/svg-skeletonization.es.js",
+      "require": "./dist/svg-skeletonization.umd.js"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "vite build"
+  },
+  "keywords": [],
+  "author": "Nikhil Nair",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "devDependencies": {
+    "vite": "^8.1.5"
+  }
+}
