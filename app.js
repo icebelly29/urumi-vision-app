@@ -124,12 +124,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     try {
                         const magicPenEnabled = document.getElementById('magicPenToggle').checked;
-                        const vectorizationMode = document.getElementById('vectorizationMode').value;
-                        
                         if (magicPenEnabled) {
-                            openLassoTool(img, canvas, vectorizationMode);
+                            progressContainer.style.display = 'block';
+                            progressFill.style.width = '40%';
+                            progressStatus.innerHTML = 'Normalizing Perspective...';
+                            
+                            setTimeout(async () => {
+                                try {
+                                    const flattenedCanvas = await processor.flatten(canvas);
+                                    openLassoTool(flattenedCanvas, flattenedCanvas);
+                                } catch (err) {
+                                    showError("Perspective Normalization failed: " + err.message);
+                                }
+                            }, 50);
                         } else {
-                            runPipeline(canvas, vectorizationMode, null);
+                            runPipeline(canvas, null, false);
                         }
                     } catch (err) {
                         showError("Processing failed: " + err.message);
@@ -151,13 +160,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     // Pipeline Execution Logic
-    async function runPipeline(imgCanvas, vectorizationMode, maskCanvas) {
+    async function runPipeline(imgCanvas, maskCanvas, isAlreadyFlattened = false) {
         progressContainer.style.display = 'block';
         progressFill.style.width = '70%';
-        progressStatus.innerHTML = 'Normalizing & Vectorizing...';
+        progressStatus.innerHTML = isAlreadyFlattened ? 'Vectorizing...' : 'Normalizing & Vectorizing...';
         
         try {
-            const result = await processor.process(imgCanvas, vectorizationMode, maskCanvas);
+            let result;
+            if (isAlreadyFlattened) {
+                result = await processor.processFlattened(imgCanvas, maskCanvas);
+            } else {
+                result = await processor.process(imgCanvas, maskCanvas);
+            }
 
             progressFill.style.width = '90%';
             progressStatus.innerHTML = 'Sending via WebRTC...';
@@ -189,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- LASSO TOOL LOGIC ---
-    function openLassoTool(img, srcCanvas, vectorizationMode) {
+    function openLassoTool(img, srcCanvas) {
         const lassoModal = document.getElementById('lassoModal');
         const lassoCanvas = document.getElementById('lassoCanvas');
         const btnPoly = document.getElementById('btnLassoPoly');
@@ -352,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
             lassoCanvas.onmousedown = lassoCanvas.onmousemove = lassoCanvas.onmouseup = null;
             lassoCanvas.ontouchstart = lassoCanvas.ontouchmove = lassoCanvas.ontouchend = null;
 
-            runPipeline(srcCanvas, vectorizationMode, maskCanvas);
+            runPipeline(srcCanvas, maskCanvas, true);
         };
     }
 

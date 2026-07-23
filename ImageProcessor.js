@@ -17,7 +17,62 @@ class ImageProcessor {
         this.inkExtractor = new InkExtractor(this.colorProfiles);
     }
 
-    async process(imageElement, vectorizationMode = 'skeleton', maskCanvas = null) {
+    async flatten(imageElement) {
+        if (!cv || !cv.Mat) {
+            throw new Error("OpenCV is not initialized yet.");
+        }
+
+        console.log("Flattening Image...");
+        let src = cv.imread(imageElement);
+        
+        const warpResult = this.warpEngine.normalizePerspective(src, null);
+        src.delete();
+
+        if (!warpResult || !warpResult.image) {
+            throw new Error("Could not detect 4 ArUco markers for bed rectangle.");
+        }
+
+        const warpedMat = warpResult.image;
+        const canvas = document.createElement('canvas');
+        cv.imshow(canvas, warpedMat);
+        warpedMat.delete();
+
+        return canvas;
+    }
+
+    async processFlattened(flattenedCanvas, maskCanvas = null) {
+        console.log("Processing Flattened Image...");
+        let warpedMat = cv.imread(flattenedCanvas);
+        let warpedMask = null;
+        
+        if (maskCanvas) {
+            warpedMask = cv.imread(maskCanvas);
+            cv.cvtColor(warpedMask, warpedMask, cv.COLOR_RGBA2GRAY);
+        }
+
+        // Extract paths by color
+        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask);
+
+        // Generate Layered SVG
+        const resultLayered = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, this.warpEngine.currentFrameConfig);
+        const svgContent = resultLayered.svg;
+        const metaContent = resultLayered.meta;
+
+        const imageUrl = flattenedCanvas.toDataURL('image/jpeg', 0.8);
+
+        warpedMat.delete();
+        if (warpedMask) warpedMask.delete();
+
+        console.log("Pipeline complete.");
+
+        return {
+            svg: svgContent,
+            image: imageUrl,
+            meta: metaContent
+        };
+    }
+
+    async process(imageElement, maskCanvas = null) {
         if (!cv || !cv.Mat) {
             throw new Error("OpenCV is not initialized yet.");
         }
@@ -43,7 +98,7 @@ class ImageProcessor {
         const warpedMask = warpResult.mask; // Might be null
 
         // 2. Extract paths by color
-        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, vectorizationMode, warpedMask);
+        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask);
 
         // 3. Generate Layered SVG
         const resultLayered = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, this.warpEngine.currentFrameConfig);
