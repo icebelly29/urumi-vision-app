@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Urumi Vision :: Pipeline Dry Run</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            background-color: #ffffff;
+            color: #000000;
+            padding: 16px;
+            line-height: 1.4;
+        }
+
+        header {
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        p.sub {
+            color: #555;
+            font-size: 13px;
+        }
+
+        #toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 8px;
+            background: #f5f5f5;
+            border: 1px solid #ccc;
+            flex-wrap: wrap;
+        }
+
+        #opencvStatus {
+            font-weight: bold;
+            color: #aa6600;
+        }
+
+        #opencvStatus.ready {
+            color: #008800;
+        }
+
+        button {
+            padding: 4px 12px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+        }
+
+        #log {
+            background: #f8f8f8;
+            border: 1px solid #ccc;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 120px;
+            overflow-y: auto;
+            margin-bottom: 16px;
+        }
+
+        #log .info {
+            color: #0000bb;
+        }
+
+        #log .ok {
+            color: #008800;
+        }
+
+        #log .warn {
+            color: #bb6600;
+        }
+
+        #log .err {
+            color: #cc0000;
+            font-weight: bold;
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+        }
+
+        .step {
+            border: 1px solid #ccc;
+            background: #ffffff;
+        }
+
+        .step-header {
+            background: #eeeeee;
+            border-bottom: 1px solid #ccc;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .step-num {
+            border: 1px solid #888;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            background: #fff;
+            flex-shrink: 0;
+        }
+
+        .step-num.done {
+            background: #ddffdd;
+            border-color: #008800;
+            color: #006600;
+        }
+
+        .step-num.error {
+            background: #ffdddd;
+            border-color: #cc0000;
+            color: #cc0000;
+        }
+
+        .step-title {
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .step-desc {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .step-body {
+            padding: 8px;
+        }
+
+        .step-body canvas,
+        .step-body img,
+        .step-body svg {
+            max-width: 100%;
+            border: 1px solid #ccc;
+            display: block;
+        }
+
+        .step-meta {
+            font-size: 11px;
+            color: #555;
+            margin-top: 6px;
+            font-family: monospace;
+        }
+
+        .step-empty {
+            font-size: 12px;
+            color: #888;
+            padding: 12px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Urumi Vision - Pipeline Dry Run</h1>
+        <p class="sub">Runs the OpenCV pipeline on an image and shows intermediate steps.</p>
+    </header>
+
+    <div id="toolbar">
+        <span id="opencvStatus">OpenCV loading...</span>
+        <label for="fileInput">Select Image:</label>
+        <input type="file" id="fileInput" accept="image/*" disabled>
+        <label style="margin-left:10px;"><input type="checkbox" id="useLasso"> Pause for Lasso Tool</label>
+        <button id="btnRun" disabled>Run Pipeline</button>
+    </div>
+
+    <div id="main">
+        <div id="log"><span class="info">&gt; Waiting for OpenCV to initialize...</span></div>
+
+        <div class="steps">
+
+            <div class="step" id="step-input">
+                <div class="step-header">
+                    <div class="step-num" id="num-input">0</div>
+                    <div>
+                        <div class="step-title">Input Image</div>
+                        <div class="step-desc">Raw file as loaded</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">No image loaded yet.</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-gray">
+                <div class="step-header">
+                    <div class="step-num" id="num-gray">1</div>
+                    <div>
+                        <div class="step-title">Grayscale Conversion</div>
+                        <div class="step-desc">COLOR_RGBA2GRAY — input to ArUco detector</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-aruco">
+                <div class="step-header">
+                    <div class="step-num" id="num-aruco">2</div>
+                    <div>
+                        <div class="step-title">ArUco Detection</div>
+                        <div class="step-desc">Markers found, centers highlighted</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-warp">
+                <div class="step-header">
+                    <div class="step-num" id="num-warp">3</div>
+                    <div>
+                        <div class="step-title">Perspective Warp</div>
+                        <div class="step-desc">warpPerspective — corrected flat view</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-hsv">
+                <div class="step-header">
+                    <div class="step-num" id="num-hsv">4</div>
+                    <div>
+                        <div class="step-title">HSV Conversion</div>
+                        <div class="step-desc">COLOR_RGBA2RGB → COLOR_RGB2HSV</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-adaptive">
+                <div class="step-header">
+                    <div class="step-num" id="num-adaptive">5</div>
+                    <div>
+                        <div class="step-title">Adaptive Threshold</div>
+                        <div class="step-desc">Bilateral blur + adaptiveThreshold — locally dark pixels</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-darkgate">
+                <div class="step-header">
+                    <div class="step-num" id="num-darkgate">6</div>
+                    <div>
+                        <div class="step-title">Darkness Gate + Color Masks</div>
+                        <div class="step-desc">Gray &lt; 120 gate, HSV color ranges combined</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-strokes">
+                <div class="step-header">
+                    <div class="step-num" id="num-strokes">7</div>
+                    <div>
+                        <div class="step-title">All Strokes Mask</div>
+                        <div class="step-desc">Dark ink OR colored ink, after morphological open</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-filtered">
+                <div class="step-header">
+                    <div class="step-num" id="num-filtered">8</div>
+                    <div>
+                        <div class="step-title">Noise-Filtered Mask</div>
+                        <div class="step-desc">Connected components — small blobs removed</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-svg">
+                <div class="step-header">
+                    <div class="step-num" id="num-svg">9</div>
+                    <div>
+                        <div class="step-title">Final SVG Output</div>
+                        <div class="step-desc">Vectorized, color-classified, layered SVG in mm</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Lasso Modal -->
+    <div id="lassoModal"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 1000; flex-direction: column;">
+        <div class="lasso-header"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #111;">
+            <div class="lasso-title"
+                style="color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                Select area to process
+            </div>
+            <div class="lasso-buttons" style="display: flex; gap: 12px;">
+                <button id="btnLassoRect"
+                    style="padding: 8px 16px; font-size: 13px; background: #222; color:white; border: 1px solid #444;">Rect</button>
+                <button id="btnLassoPoly"
+                    style="padding: 8px 16px; font-size: 13px; background: #222; color:white; border: 1px solid #444;">Poly</button>
+                <button id="btnLassoClear"
+                    style="padding: 8px 16px; font-size: 13px; background: #ef4444; color:white; border:none;">Clear</button>
+                <button id="btnLassoConfirm"
+                    style="padding: 8px 16px; font-size: 13px; background:#3b82f6; color:white; border:none;">Confirm</button>
+            </div>
+        </div>
+        <div
+            style="flex: 1; overflow: hidden; position: relative; display: flex; justify-content: center; align-items: center; padding: 20px;">
+            <canvas id="lassoCanvas"
+                style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: crosshair; touch-action: none; border: 1px solid #333; background:#222;"></canvas>
+        </div>
+        <div style="color: #888; text-align: center; padding: 12px; font-size: 13px; background: #111;">
+            Draw around the ink. The area drawn will be preserved; everything outside will be erased.
+        </div>
+    </div>
+
+    <!-- Scripts — same as index.html -->
+    <script src="lib/trace_skeleton.js"></script>
+    <script src="pipeline/WarpEngine.js"></script>
+    <script src="pipeline/InkExtractor.js"></script>
+    <script src="pipeline/SvgGenerator.js"></script>
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
+
+    <script>
+        const log = document.getElementById('log');
+        function addLog(msg, cls = 'info') {
+            const el = document.createElement('div');
+            el.className = cls;
+            el.textContent = msg;
+            log.appendChild(el);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function setStep(id, done, err) {
+            const el = document.getElementById('num-' + id);
+            if (err) { el.classList.add('error'); el.textContent = '✗'; }
+            else if (done) { el.classList.add('done'); el.textContent = '✓'; }
+        }
+
+        function showCanvas(stepId, mat, label, append = false) {
+            const body = document.querySelector('#step-' + stepId + ' .step-body');
+            const container = document.createElement('div');
+            container.style.marginBottom = '12px';
+            const c = document.createElement('canvas');
+            cv.imshow(c, mat);
+            const meta = document.createElement('div');
+            meta.className = 'step-meta';
+            meta.textContent = label || `${mat.cols} × ${mat.rows} px`;
+            if (!append) {
+                body.innerHTML = '';
+            }
+            container.appendChild(c);
+            container.appendChild(meta);
+            body.appendChild(container);
+            setStep(stepId, true);
+        }
+
+        function showImg(stepId, img, meta) {
+            const body = document.querySelector('#step-' + stepId + ' .step-body');
+            const el = document.createElement('img');
+            el.src = img.src || img;
+            const m = document.createElement('div');
+            m.className = 'step-meta';
+            m.textContent = meta || '';
+            body.innerHTML = '';
+            body.appendChild(el);
+            body.appendChild(m);
+            setStep(stepId, true);
+        }
+
+        function onOpenCvReady() {
+            addLog('OpenCV ready.', 'ok');
+            document.getElementById('opencvStatus').textContent = 'OpenCV ready';
+            document.getElementById('opencvStatus').classList.add('ready');
+            document.getElementById('fileInput').disabled = false;
+            document.getElementById('btnRun').disabled = false;
+        }
+
+        let loadedImg = null;
+
+        function openLassoToolAsync(warpedMat) {
+            return new Promise((resolve) => {
+                const lassoModal = document.getElementById('lassoModal');
+                const lassoCanvas = document.getElementById('lassoCanvas');
+                const btnPoly = document.getElementById('btnLassoPoly');
+                const btnRect = document.getElementById('btnLassoRect');
+                const btnClear = document.getElementById('btnLassoClear');
+                const btnConfirm = document.getElementById('btnLassoConfirm');
+
+                lassoModal.style.display = 'flex';
+                const ctx = lassoCanvas.getContext('2d');
+
+                // We need an offscreen canvas to hold the full res image
+                const offscreen = document.createElement('canvas');
+                cv.imshow(offscreen, warpedMat);
+
+                const displayWidth = window.innerWidth * 0.9;
+                const displayHeight = window.innerHeight * 0.7;
+                const scale = Math.min(displayWidth / warpedMat.cols, displayHeight / warpedMat.rows);
+
+                lassoCanvas.width = warpedMat.cols * scale;
+                lassoCanvas.height = warpedMat.rows * scale;
+
+                let currentMode = 'poly';
+                let points = [];
+                let isDrawing = false;
+                let rectStart = null;
+                let rectEnd = null;
+
+                function render() {
+                    ctx.clearRect(0, 0, lassoCanvas.width, lassoCanvas.height);
+                    ctx.drawImage(offscreen, 0, 0, lassoCanvas.width, lassoCanvas.height);
+
+                    if (points.length > 2 || (rectStart && rectEnd)) {
+                        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                        ctx.fillRect(0, 0, lassoCanvas.width, lassoCanvas.height);
+                        ctx.save();
+                        ctx.beginPath();
+                        if (currentMode === 'poly' && points.length > 0) {
+                            ctx.moveTo(points[0].x, points[0].y);
+                            for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+                            ctx.closePath();
+                        } else if (currentMode === 'rect' && rectStart && rectEnd) {
+                            ctx.rect(rectStart.x, rectStart.y, rectEnd.x - rectStart.x, rectEnd.y - rectStart.y);
+                        }
+                        ctx.clip();
+                        ctx.drawImage(offscreen, 0, 0, lassoCanvas.width, lassoCanvas.height);
+                        ctx.restore();
+                    }
+
+                    ctx.strokeStyle = '#3B82F6';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    if (currentMode === 'poly' && points.length > 0) {
+                        ctx.moveTo(points[0].x, points[0].y);
+                        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+                        if (points.length > 2) ctx.closePath();
+                        ctx.stroke();
+                    } else if (currentMode === 'rect' && rectStart && rectEnd) {
+                        ctx.strokeRect(rectStart.x, rectStart.y, rectEnd.x - rectStart.x, rectEnd.y - rectStart.y);
+                    }
+                }
+
+                render();
+
+                const setMode = (mode) => {
+                    currentMode = mode;
+                    points = []; rectStart = null; rectEnd = null;
+                    btnPoly.style.borderColor = mode === 'poly' ? '#3B82F6' : '#444';
+                    btnRect.style.borderColor = mode === 'rect' ? '#3B82F6' : '#444';
+                    render();
+                };
+                btnPoly.onclick = () => setMode('poly');
+                btnRect.onclick = () => setMode('rect');
+                setMode('poly');
+
+                btnClear.onclick = () => { points = []; rectStart = null; rectEnd = null; render(); };
+
+                const getPos = (e) => {
+                    const rect = lassoCanvas.getBoundingClientRect();
+                    let clientX = e.clientX, clientY = e.clientY;
+                    if (e.touches && e.touches.length > 0) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+                    return {
+                        x: (clientX - rect.left) * (lassoCanvas.width / rect.width),
+                        y: (clientY - rect.top) * (lassoCanvas.height / rect.height)
+                    };
+                };
+
+                lassoCanvas.onmousedown = lassoCanvas.ontouchstart = (e) => {
+                    e.preventDefault();
+                    const pos = getPos(e);
+                    if (currentMode === 'poly') points.push(pos);
+                    else { isDrawing = true; rectStart = pos; rectEnd = pos; }
+                    render();
+                };
+
+                lassoCanvas.onmousemove = lassoCanvas.ontouchmove = (e) => {
+                    e.preventDefault();
+                    if (!isDrawing || currentMode !== 'rect') return;
+                    rectEnd = getPos(e);
+                    render();
+                };
+
+                lassoCanvas.onmouseup = lassoCanvas.ontouchend = () => { isDrawing = false; };
+
+                btnConfirm.onclick = () => {
+                    try {
+                        lassoModal.style.display = 'none';
+                        btnPoly.onclick = btnRect.onclick = btnClear.onclick = btnConfirm.onclick = null;
+                        lassoCanvas.onmousedown = lassoCanvas.onmousemove = lassoCanvas.onmouseup = null;
+                        lassoCanvas.ontouchstart = lassoCanvas.ontouchmove = lassoCanvas.ontouchend = null;
+
+                        let maskMat = cv.Mat.zeros(warpedMat.rows, warpedMat.cols, cv.CV_8UC1);
+                        const scaleX = warpedMat.cols / lassoCanvas.width;
+                        const scaleY = warpedMat.rows / lassoCanvas.height;
+
+                        if ((currentMode === 'poly' && points.length > 2) || (currentMode === 'rect' && rectStart && rectEnd)) {
+                            let pointArray = [];
+                            if (currentMode === 'poly') {
+                                for (let pt of points) {
+                                    pointArray.push(Math.round(pt.x * scaleX), Math.round(pt.y * scaleY));
+                                }
+                            } else {
+                                pointArray.push(
+                                    Math.round(rectStart.x * scaleX), Math.round(rectStart.y * scaleY),
+                                    Math.round(rectEnd.x * scaleX), Math.round(rectStart.y * scaleY),
+                                    Math.round(rectEnd.x * scaleX), Math.round(rectEnd.y * scaleY),
+                                    Math.round(rectStart.x * scaleX), Math.round(rectEnd.y * scaleY)
+                                );
+                            }
+
+                            let ptMat = cv.matFromArray(pointArray.length / 2, 1, cv.CV_32SC2, pointArray);
+                            let pointVector = new cv.MatVector();
+                            pointVector.push_back(ptMat);
+                            cv.fillPoly(maskMat, pointVector, new cv.Scalar(255, 255, 255, 255));
+                            ptMat.delete(); pointVector.delete();
+                            resolve(maskMat);
+                        } else {
+                            // no valid mask -> no mask
+                            maskMat.delete();
+                            resolve(null);
+                        }
+                    } catch (e) {
+                        addLog('Lasso Tool Error: ' + e.message, 'err');
+                        console.error(e);
+                        resolve(null);
+                    }
+                };
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const img = new Image();
+            img.onload = () => {
+                loadedImg = img;
+                showImg('input', img, `${img.width} × ${img.height} px — 2_colour_test.jpg`);
+                setStep('input', true);
+                addLog(`Default image loaded: 2_colour_test.jpg (${img.width}×${img.height})`, 'ok');
+            };
+            img.onerror = () => {
+                addLog('Failed to load default image: test_images/2_colour_test.jpg', 'warn');
+            };
+            img.src = 'test_images/2_colour_test.jpg';
+        });
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                loadedImg = img;
+                URL.revokeObjectURL(url);
+                showImg('input', img, `${img.width} × ${img.height} px — ${file.name}`);
+                setStep('input', true);
+                addLog(`Image loaded: ${file.name} (${img.width}×${img.height})`, 'ok');
+            };
+            img.src = url;
+        });
+
+        document.getElementById('btnRun').addEventListener('click', async () => {
+            if (!loadedImg) { addLog('No image loaded.', 'warn'); return; }
+            document.getElementById('btnRun').disabled = true;
+            addLog('--- Starting dry run ---', 'info');
+
+            try {
+                // Draw to canvas
+                const canvas = document.createElement('canvas');
+                canvas.width = loadedImg.width;
+                canvas.height = loadedImg.height;
+                canvas.getContext('2d').drawImage(loadedImg, 0, 0);
+
+                let src = cv.imread(canvas);
+
+                // STEP 1 — Grayscale
+                addLog('Step 1: Grayscale conversion...', 'info');
+                let gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                showCanvas('gray', gray, `${gray.cols} × ${gray.rows} px — single channel`);
+                addLog('Step 1 done.', 'ok');
+
+                // STEP 2 — ArUco detection
+                addLog('Step 2: ArUco detection...', 'info');
+                let dictionary = cv.getPredefinedDictionary(cv.DICT_4X4_50);
+                let corners = new cv.MatVector();
+                let ids = new cv.Mat();
+                let parameters = new cv.aruco_DetectorParameters();
+                let refineParameters = new cv.aruco_RefineParameters(10, 3, true);
+                let detector = new cv.aruco_ArucoDetector(dictionary, parameters, refineParameters);
+                detector.detectMarkers(gray, corners, ids);
+
+                addLog(`Found ${ids.rows} ArUco markers.`, ids.rows >= 4 ? 'ok' : 'warn');
+
+                // Draw markers on a visualization
+                let arucoViz = src.clone();
+                let markerCenters = {};
+                for (let i = 0; i < ids.rows; i++) {
+                    let id = ids.data32S[i];
+                    let corner = corners.get(i);
+                    let cx = (corner.data32F[0] + corner.data32F[2] + corner.data32F[4] + corner.data32F[6]) / 4;
+                    let cy = (corner.data32F[1] + corner.data32F[3] + corner.data32F[5] + corner.data32F[7]) / 4;
+                    markerCenters[id] = { x: cx, y: cy };
+                    cv.circle(arucoViz, new cv.Point(cx, cy), 20, new cv.Scalar(0, 255, 0, 255), -1);
+                    cv.putText(arucoViz, `ID:${id}`, new cv.Point(cx + 25, cy + 10), cv.FONT_HERSHEY_SIMPLEX, 1.5, new cv.Scalar(0, 255, 0, 255), 3);
+                    corner.delete();
+                }
+                showCanvas('aruco', arucoViz, `${ids.rows} markers detected — green dots = ArUco centers`);
+                arucoViz.delete();
+                corners.delete(); ids.delete(); dictionary.delete(); parameters.delete(); refineParameters.delete(); detector.delete();
+
+                if (Object.keys(markerCenters).length < 4) {
+                    setStep('aruco', false, true);
+                    addLog('ERROR: Less than 4 markers found. Cannot warp. Stopping.', 'err');
+                    document.getElementById('btnRun').disabled = false;
+                    gray.delete(); src.delete();
+                    return;
+                }
+
+                // STEP 3 — Perspective Warp
+                addLog('Step 3: Perspective warp...', 'info');
+                const OUTPUT_WIDTH = 2000;
+                const warpEngine = new WarpEngine(OUTPUT_WIDTH);
+                const warpResult = warpEngine.normalizePerspective(src, null);
+
+                if (!warpResult || !warpResult.image) {
+                    setStep('warp', false, true);
+                    addLog('ERROR: Warp failed.', 'err');
+                    gray.delete(); src.delete();
+                    document.getElementById('btnRun').disabled = false;
+                    return;
+                }
+
+                const warpedMat = warpResult.image;
+                showCanvas('warp', warpedMat, `${warpedMat.cols} × ${warpedMat.rows} px — corrected flat view`);
+
+                let userMaskMat = null;
+                if (document.getElementById('useLasso').checked) {
+                    addLog('Waiting for Lasso Tool input...', 'warn');
+                    userMaskMat = await openLassoToolAsync(warpedMat);
+                    if (userMaskMat) {
+                        showCanvas('warp', userMaskMat, `User Lasso Mask (applied in Step 7)`, true);
+                    }
+                }
+
+                addLog(`Step 3 done. Output: ${warpedMat.cols}×${warpedMat.rows}`, 'ok');
+
+                // STEP 4 — HSV
+                addLog('Step 4: HSV conversion...', 'info');
+                let hsvDisplay = new cv.Mat();
+                cv.cvtColor(warpedMat, hsvDisplay, cv.COLOR_RGBA2RGB);
+                cv.cvtColor(hsvDisplay, hsvDisplay, cv.COLOR_RGB2HSV);
+                showCanvas('hsv', hsvDisplay, `HSV color space — H=hue, S=saturation, V=brightness`);
+
+                let hsvPlanes = new cv.MatVector();
+                cv.split(hsvDisplay, hsvPlanes);
+                let hPlane = hsvPlanes.get(0), sPlane = hsvPlanes.get(1), vPlane = hsvPlanes.get(2);
+                showCanvas('hsv', hPlane, `Hue Channel`, true);
+                showCanvas('hsv', sPlane, `Saturation Channel`, true);
+                showCanvas('hsv', vPlane, `Value Channel`, true);
+                hPlane.delete(); sPlane.delete(); vPlane.delete(); hsvPlanes.delete();
+
+                hsvDisplay.delete();
+                addLog('Step 4 done.', 'ok');
+
+                // STEP 5 — Adaptive Threshold
+                addLog('Step 5: Adaptive threshold...', 'info');
+                let grayWarped = new cv.Mat();
+                cv.cvtColor(warpedMat, grayWarped, cv.COLOR_RGBA2GRAY);
+                let blurred = new cv.Mat();
+                cv.bilateralFilter(grayWarped, blurred, 9, 75, 75);
+                showCanvas('adaptive', blurred, `Bilateral blur`);
+                let adaptiveMask = new cv.Mat();
+                cv.adaptiveThreshold(blurred, adaptiveMask, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 51, 10);
+                blurred.delete();
+                showCanvas('adaptive', adaptiveMask, `White = locally-dark pixels (ink candidates)`, true);
+                addLog('Step 5 done.', 'ok');
+
+                // STEP 6 — Darkness Gate + Color Masks
+                addLog('Step 6: Darkness gate + color masks...', 'info');
+                let darkGate = new cv.Mat();
+                cv.threshold(grayWarped, darkGate, 120, 255, cv.THRESH_BINARY_INV);
+                let darkInk = new cv.Mat();
+                cv.bitwise_and(adaptiveMask, darkGate, darkInk);
+                showCanvas('darkgate', darkGate, `Dark Gate (Gray < 120)`);
+                showCanvas('darkgate', darkInk, `White = gray < 120 AND locally dark — pure ink strokes`, true);
+                adaptiveMask.delete(); darkGate.delete();
+
+                // Color masks
+                let hsv2 = new cv.Mat();
+                cv.cvtColor(warpedMat, hsv2, cv.COLOR_RGBA2RGB);
+                cv.cvtColor(hsv2, hsv2, cv.COLOR_RGB2HSV);
+
+                let redMask1 = new cv.Mat(), redMask2 = new cv.Mat(), greenMask = new cv.Mat(), blueMask = new cv.Mat();
+                let r1L = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(0, 60, 40, 0));
+                let r1H = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(12, 255, 255, 0));
+                cv.inRange(hsv2, r1L, r1H, redMask1);
+                let r2L = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(168, 60, 40, 0));
+                let r2H = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(179, 255, 255, 0));
+                cv.inRange(hsv2, r2L, r2H, redMask2);
+                let gL = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(36, 60, 40, 0));
+                let gH = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(90, 255, 255, 0));
+                cv.inRange(hsv2, gL, gH, greenMask);
+                let bL = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(100, 80, 40, 0));
+                let bH = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(140, 255, 255, 0));
+                cv.inRange(hsv2, bL, bH, blueMask);
+                let coloredInkMask = new cv.Mat();
+                let combinedRed = new cv.Mat();
+                cv.bitwise_or(redMask1, redMask2, combinedRed);
+                cv.bitwise_or(combinedRed, greenMask, coloredInkMask);
+                cv.bitwise_or(coloredInkMask, blueMask, coloredInkMask);
+
+                showCanvas('darkgate', combinedRed, `Red Mask`, true);
+                showCanvas('darkgate', greenMask, `Green Mask`, true);
+                showCanvas('darkgate', blueMask, `Blue Mask`, true);
+                showCanvas('darkgate', coloredInkMask, `Combined Color Mask`, true);
+
+                [redMask1, redMask2, combinedRed, greenMask, blueMask, r1L, r1H, r2L, r2H, gL, gH, bL, bH, hsv2].forEach(m => m.delete());
+                addLog('Step 6 done.', 'ok');
+
+                // STEP 7 — All Strokes
+                addLog('Step 7: Combining ink masks...', 'info');
+                let allStrokes = new cv.Mat();
+                cv.bitwise_or(darkInk, coloredInkMask, allStrokes);
+                showCanvas('strokes', allStrokes, `Initial Combined Ink Masks`);
+                darkInk.delete(); coloredInkMask.delete();
+                let openK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+                cv.morphologyEx(allStrokes, allStrokes, cv.MORPH_OPEN, openK);
+                openK.delete();
+                showCanvas('strokes', allStrokes, `After Morphological Open`, true);
+
+                if (userMaskMat && !userMaskMat.empty()) {
+                    cv.bitwise_and(allStrokes, userMaskMat, allStrokes);
+                    showCanvas('strokes', allStrokes, `After Lasso Mask`, true);
+                }
+
+                // Border exclusion
+                let borderPx = Math.max(8, Math.floor(0.01 * Math.min(warpedMat.cols, warpedMat.rows)));
+                cv.rectangle(allStrokes, new cv.Point(0, 0), new cv.Point(warpedMat.cols, borderPx), new cv.Scalar(0), cv.FILLED);
+                cv.rectangle(allStrokes, new cv.Point(0, warpedMat.rows - borderPx), new cv.Point(warpedMat.cols, warpedMat.rows), new cv.Scalar(0), cv.FILLED);
+                cv.rectangle(allStrokes, new cv.Point(0, 0), new cv.Point(borderPx, warpedMat.rows), new cv.Scalar(0), cv.FILLED);
+                cv.rectangle(allStrokes, new cv.Point(warpedMat.cols - borderPx, 0), new cv.Point(warpedMat.cols, warpedMat.rows), new cv.Scalar(0), cv.FILLED);
+                const strokeCount = cv.countNonZero(allStrokes);
+                showCanvas('strokes', allStrokes, `${strokeCount.toLocaleString()} ink pixels after border exclusion`, true);
+                addLog(`Step 7 done. Ink pixels: ${strokeCount}`, 'ok');
+
+                // STEP 8 — Filtered mask (connected components)
+                addLog('Step 8: Connected components noise filter...', 'info');
+                let preClosedStrokes = new cv.Mat();
+                let preCloseKernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+                cv.morphologyEx(allStrokes, preClosedStrokes, cv.MORPH_CLOSE, preCloseKernel);
+                preCloseKernel.delete();
+                let labels = new cv.Mat(), stats = new cv.Mat(), centroids = new cv.Mat();
+                let numLabels = cv.connectedComponentsWithStats(preClosedStrokes, labels, stats, centroids, 8, cv.CV_32S);
+                let areaFloor = Math.max(100, Math.floor(0.00005 * warpedMat.cols * warpedMat.rows));
+                let spanFloor = Math.max(20, Math.floor(0.01 * Math.min(warpedMat.cols, warpedMat.rows)));
+                let filteredMask = cv.Mat.zeros(preClosedStrokes.rows, preClosedStrokes.cols, cv.CV_8UC1);
+                let keepLabel = new Uint8Array(numLabels);
+                for (let i = 1; i < numLabels; i++) {
+                    let area = stats.intPtr(i, cv.CC_STAT_AREA)[0];
+                    let compW = stats.intPtr(i, cv.CC_STAT_WIDTH)[0];
+                    let compH = stats.intPtr(i, cv.CC_STAT_HEIGHT)[0];
+                    if (area >= areaFloor || Math.max(compW, compH) >= spanFloor) keepLabel[i] = 255;
+                }
+                let labelsData = labels.data32S, outData = filteredMask.data;
+                for (let i = 0; i < labelsData.length; i++) outData[i] = keepLabel[labelsData[i]] || 0;
+                preClosedStrokes.delete(); labels.delete(); stats.delete(); centroids.delete();
+                showCanvas('filtered', filteredMask, `${numLabels - 1} blobs found — noise blobs removed (area < ${areaFloor}px, span < ${spanFloor}px)`);
+                addLog(`Step 8 done. Labels: ${numLabels - 1}`, 'ok');
+                filteredMask.delete(); allStrokes.delete();
+
+                // STEP 9 — Full InkExtractor + SVG
+                addLog('Step 9: Full InkExtractor + SvgGenerator...', 'info');
+                const colorProfiles = {
+                    thru_cut: { layer: 'thru_cut', color: '#3b82f6' },
+                    score: { layer: 'score', color: '#ef4444' },
+                    crease: { layer: 'crease', color: '#22c55e' }
+                };
+                const inkExtractor = new InkExtractor(colorProfiles);
+                const layersData = inkExtractor.extractColorPaths(warpedMat, warpEngine.currentFrameConfig, warpEngine.borderSizeMm, userMaskMat || null);
+
+                let totalPaths = 0;
+                for (const [id, data] of Object.entries(layersData)) {
+                    addLog(`  Layer [${id}]: ${data.paths.length} paths`, 'ok');
+                    totalPaths += data.paths.length;
+                }
+
+                const svgResult = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, warpEngine.currentFrameConfig);
+                const svgBody = document.querySelector('#step-svg .step-body');
+                svgBody.innerHTML = svgResult.svg;
+                const svgMeta = document.createElement('div');
+                svgMeta.className = 'step-meta';
+                svgMeta.textContent = `${totalPaths} total paths | ${svgResult.meta.physical_width}×${svgResult.meta.physical_height} mm | ${svgResult.meta.dots_per_mm.toFixed(2)} px/mm`;
+                svgBody.appendChild(svgMeta);
+                setStep('svg', true);
+                addLog(`Step 9 done. ${totalPaths} paths. SVG: ${svgResult.meta.physical_width}×${svgResult.meta.physical_height}mm`, 'ok');
+
+                // Cleanup
+                src.delete(); gray.delete(); grayWarped.delete(); warpedMat.delete();
+                if (warpResult.mask) warpResult.mask.delete();
+                if (userMaskMat) userMaskMat.delete();
+
+                addLog('--- Dry run complete. ---', 'ok');
+
+            } catch (err) {
+                addLog('ERROR: ' + err.message, 'err');
+                console.error(err);
+            }
+
+            document.getElementById('btnRun').disabled = false;
+        });
+    </script>
+</body>
+
+</html>

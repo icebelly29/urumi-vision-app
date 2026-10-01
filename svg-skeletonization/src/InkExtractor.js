@@ -16,14 +16,12 @@ export class InkExtractor {
         let blurred = new cv.Mat();
         cv.bilateralFilter(gray, blurred, 9, 75, 75);
         let adaptiveMask = new cv.Mat();
-        cv.adaptiveThreshold(blurred, adaptiveMask, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 51, 10);
+        cv.adaptiveThreshold(blurred, adaptiveMask, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 51, 4);
         blurred.delete();
 
-        // STEP 2: Absolute darkness gate — only keep pixels with gray < 120.
-        // The Lasso tool now handles workpiece edges, so we can be more permissive
-        // to ensure black ink on white paper isn't fragmented.
+        // STEP 2: Absolute darkness gate — keep faint thin ink pixels (gray < 150)
         let darkGate = new cv.Mat();
-        cv.threshold(gray, darkGate, 120, 255, cv.THRESH_BINARY_INV);
+        cv.threshold(gray, darkGate, 150, 255, cv.THRESH_BINARY_INV);
         let darkInk = new cv.Mat();
         cv.bitwise_and(adaptiveMask, darkGate, darkInk);
         adaptiveMask.delete(); darkGate.delete();
@@ -59,10 +57,10 @@ export class InkExtractor {
         cv.bitwise_or(darkInk, coloredInkMask, allStrokes);
         darkInk.delete(); coloredInkMask.delete();
 
-        // Morphological open to kill texture specks
-        let openK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
-        cv.morphologyEx(allStrokes, allStrokes, cv.MORPH_OPEN, openK);
-        openK.delete();
+        // Morphological close to bridge thin gaps without eroding thin strokes
+        let closeK = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
+        cv.morphologyEx(allStrokes, allStrokes, cv.MORPH_CLOSE, closeK);
+        closeK.delete();
 
         // 4c: Apply user Lasso Mask (if provided)
         if (warpedMask && !warpedMask.empty()) {
@@ -196,10 +194,10 @@ export class InkExtractor {
                 // However, the low Blue of the Cardboard forces the Von Kries `multB` very high (e.g., 1.4x).
                 // This artificially explodes Blue camera noise in dark inks, falsely causing Green/Black ink to vote Blue.
                 // Thus, we MUST use RAW data (`bestB` > `bestG`) to safely separate Blue from Green!
-                
+
                 let isGreen = (adjG > adjR + 5) && (bestG > bestB + 2);
-                let isBlue  = (bestB > bestG + 10) && (bestB > bestR + 5);
-                let isRed   = (adjR > adjG + 15) && (adjR > adjB + 15);
+                let isBlue = (bestB > bestG + 10) && (bestB > bestR + 5);
+                let isRed = (adjR > adjG + 15) && (adjR > adjB + 15);
 
                 if (isGreen) {
                     pointColors.push('green');
@@ -214,7 +212,7 @@ export class InkExtractor {
 
             // Sliding window majority vote to smooth out color noise/artifacts
             let smoothedColors = [];
-            const WINDOW_SIZE = 7; 
+            const WINDOW_SIZE = 7;
             for (let j = 0; j < pointColors.length; j++) {
                 let votes = { red: 0, green: 0, blue: 0, black: 0 };
                 for (let w = -WINDOW_SIZE; w <= WINDOW_SIZE; w++) {
@@ -234,14 +232,14 @@ export class InkExtractor {
 
             const pushSegment = (color, segment) => {
                 if (segment.length < 5) return; // Ignore microscopic noise
-                
+
                 let layer = 'thru_cut';
                 if (color === 'red') layer = 'score';
                 else if (color === 'green') layer = 'crease';
-                
+
                 // Re-simplify the segment so we don't output thousands of dense evalPoints to SVG
                 let simplified = this._simplifyPath(segment, 1.5);
-                
+
                 if (shape.type === 'circle') {
                     // A circle broken by colors must be drawn as paths, not <circle>
                     results[layer].paths.push({ type: 'path', points: simplified });
@@ -311,83 +309,83 @@ export class InkExtractor {
         let rawPaths = [];
 
 
-            // Heavily close the mask just for geometric detection to bridge gaps in hand-drawn shapes
-            let shapeMask = new cv.Mat();
-            let shapeKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(15, 15));
-            cv.morphologyEx(finalMask, shapeMask, cv.MORPH_CLOSE, shapeKernel);
-            shapeKernel.delete();
+        // Heavily close the mask just for geometric detection to bridge gaps in hand-drawn shapes
+        let shapeMask = new cv.Mat();
+        let shapeKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(15, 15));
+        cv.morphologyEx(finalMask, shapeMask, cv.MORPH_CLOSE, shapeKernel);
+        shapeKernel.delete();
 
-            let contours = new cv.MatVector();
-            let hierarchy = new cv.Mat();
-            cv.findContours(shapeMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-            shapeMask.delete();
+        let contours = new cv.MatVector();
+        let hierarchy = new cv.Mat();
+        cv.findContours(shapeMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        shapeMask.delete();
 
-            for (let i = 0; i < contours.size(); ++i) {
-                let contour = contours.get(i);
-                let area = cv.contourArea(contour);
-                if (area < 100) { contour.delete(); continue; }
+        for (let i = 0; i < contours.size(); ++i) {
+            let contour = contours.get(i);
+            let area = cv.contourArea(contour);
+            if (area < 100) { contour.delete(); continue; }
 
-                // Use the convex hull to smooth out all hand-drawn wiggles
-                let hull = new cv.Mat();
-                cv.convexHull(contour, hull, false, true);
-                let hullArea = cv.contourArea(hull);
-                let solidity = area / (hullArea || 1);
+            // Use the convex hull to smooth out all hand-drawn wiggles
+            let hull = new cv.Mat();
+            cv.convexHull(contour, hull, false, true);
+            let hullArea = cv.contourArea(hull);
+            let solidity = area / (hullArea || 1);
 
-                let isGeometric = false;
+            let isGeometric = false;
 
-                // Only attempt to snap to perfect geometry if the shape is mostly convex.
-                // A hollow triangle or circle has high solidity (~0.9+).
-                // An arrow or text has very low solidity (< 0.4) and will be left as a path.
-                if (solidity > 0.75) {
-                    let hullPerimeter = cv.arcLength(hull, true);
-                    let approx = new cv.Mat();
-                    // 0.05 is highly forgiving for snapping to perfect corners
-                    cv.approxPolyDP(hull, approx, 0.05 * hullPerimeter, true);
+            // Only attempt to snap to perfect geometry if the shape is mostly convex.
+            // A hollow triangle or circle has high solidity (~0.9+).
+            // An arrow or text has very low solidity (< 0.4) and will be left as a path.
+            if (solidity > 0.75) {
+                let hullPerimeter = cv.arcLength(hull, true);
+                let approx = new cv.Mat();
+                // 0.05 is highly forgiving for snapping to perfect corners
+                cv.approxPolyDP(hull, approx, 0.05 * hullPerimeter, true);
 
-                    let vertices = approx.rows;
-                    let circularity = 4 * Math.PI * (hullArea / (hullPerimeter * hullPerimeter));
+                let vertices = approx.rows;
+                let circularity = 4 * Math.PI * (hullArea / (hullPerimeter * hullPerimeter));
 
-                    // 0.75 allows for slightly squashed hand-drawn circles
-                    if (circularity > 0.75) {
-                        let circle = cv.minEnclosingCircle(contour);
-                        perfectShapes.push({ type: 'circle', cx: circle.center.x, cy: circle.center.y, r: circle.radius });
-                        isGeometric = true;
-                    } else if (vertices >= 3 && vertices <= 8) {
-                        for (let j = 0; j < vertices; j++) {
-                            let p1 = [approx.data32S[j * 2], approx.data32S[j * 2 + 1]];
-                            let p2 = (j === vertices - 1) 
-                                ? [approx.data32S[0], approx.data32S[1]] 
-                                : [approx.data32S[(j + 1) * 2], approx.data32S[(j + 1) * 2 + 1]];
-                            
-                            perfectShapes.push({ type: 'path', points: [p1, p2] });
-                        }
-                        isGeometric = true;
+                // 0.75 allows for slightly squashed hand-drawn circles
+                if (circularity > 0.75) {
+                    let circle = cv.minEnclosingCircle(contour);
+                    perfectShapes.push({ type: 'circle', cx: circle.center.x, cy: circle.center.y, r: circle.radius });
+                    isGeometric = true;
+                } else if (vertices >= 3 && vertices <= 8) {
+                    for (let j = 0; j < vertices; j++) {
+                        let p1 = [approx.data32S[j * 2], approx.data32S[j * 2 + 1]];
+                        let p2 = (j === vertices - 1)
+                            ? [approx.data32S[0], approx.data32S[1]]
+                            : [approx.data32S[(j + 1) * 2], approx.data32S[(j + 1) * 2 + 1]];
+
+                        perfectShapes.push({ type: 'path', points: [p1, p2] });
                     }
-                    approx.delete();
+                    isGeometric = true;
                 }
-
-                if (isGeometric) {
-                    let blobMask = cv.Mat.zeros(finalMask.rows, finalMask.cols, cv.CV_8U);
-                    cv.drawContours(blobMask, contours, i, new cv.Scalar(255), cv.FILLED);
-                    let maskROI = new cv.Mat();
-                    cv.bitwise_and(finalMask, blobMask, maskROI);
-                    let inkArea = cv.countNonZero(maskROI);
-
-                    // If it's a solid shape, fill it to erase it. If hollow, draw over the stroke to erase it.
-                    if (area > 0 && inkArea / area > 0.6) {
-                        cv.drawContours(finalMask, contours, i, new cv.Scalar(0), cv.FILLED);
-                    } else {
-                        // Use a thick brush to erase the stroke so it doesn't get skeletonized
-                        cv.drawContours(finalMask, contours, i, new cv.Scalar(0), 30);
-                    }
-                    blobMask.delete(); maskROI.delete();
-                }
-
-                hull.delete();
-                contour.delete();
+                approx.delete();
             }
-            contours.delete();
-            hierarchy.delete();
+
+            if (isGeometric) {
+                let blobMask = cv.Mat.zeros(finalMask.rows, finalMask.cols, cv.CV_8U);
+                cv.drawContours(blobMask, contours, i, new cv.Scalar(255), cv.FILLED);
+                let maskROI = new cv.Mat();
+                cv.bitwise_and(finalMask, blobMask, maskROI);
+                let inkArea = cv.countNonZero(maskROI);
+
+                // If it's a solid shape, fill it to erase it. If hollow, draw over the stroke to erase it.
+                if (area > 0 && inkArea / area > 0.6) {
+                    cv.drawContours(finalMask, contours, i, new cv.Scalar(0), cv.FILLED);
+                } else {
+                    // Use a thick brush to erase the stroke so it doesn't get skeletonized
+                    cv.drawContours(finalMask, contours, i, new cv.Scalar(0), 30);
+                }
+                blobMask.delete(); maskROI.delete();
+            }
+
+            hull.delete();
+            contour.delete();
+        }
+        contours.delete();
+        hierarchy.delete();
         rawPaths = this._vectorizeAndSkeletonize(finalMask);
         finalMask.delete();
 
@@ -400,8 +398,6 @@ export class InkExtractor {
             }
             let width = maxX - minX, height = maxY - minY;
             if (width > imgWidth * 0.45 || height > imgHeight * 0.45) return null;
-            let maxDim = Math.max(width, height), minDim = Math.max(1, Math.min(width, height));
-            if (maxDim > Math.min(imgWidth, imgHeight) * 0.15 && (maxDim / minDim) > 12) return null;
 
             let diagonal = Math.sqrt(width * width + height * height);
 
