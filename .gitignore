@@ -1,2 +1,22 @@
 ai_project_context.md
 email_draft_quentin.md
+
+# Scratch and temporary files
+scratch/
+scratch_*
+crop_test.png
+line_thickness_thumb.jpg
+.agents/
+
+# Datasets and archives
+dataset/
+*.zip
+
+# Model weights
+*.pt
+*.onnx
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

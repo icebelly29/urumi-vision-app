@@ -1,0 +1,3120 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Urumi Vision :: Stroke Detector 9-Stage Pipeline Dry Run (ROI Zoom)</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            background-color: #ffffff;
+            color: #000000;
+            padding: 16px;
+            line-height: 1.4;
+        }
+
+        header {
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        p.sub {
+            color: #555;
+            font-size: 13px;
+        }
+
+        #toolbar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 16px;
+            padding: 12px 14px;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .tb-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .tb-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .tb-group label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .tb-group-title {
+            font-weight: 700;
+            font-size: 12px;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-right: 4px;
+        }
+
+        .param-help {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background: #e2e8f0;
+            color: #475569;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: help;
+            margin-left: 2px;
+            position: relative;
+        }
+
+        .param-help:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            color: #f8fafc;
+            padding: 6px 10px;
+            border-radius: 5px;
+            font-size: 11px;
+            line-height: 1.3;
+            white-space: normal;
+            width: 220px;
+            z-index: 1000;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+            font-weight: normal;
+            text-transform: none;
+        }
+
+        .badge-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+            user-select: none;
+        }
+
+        .badge-pill.blue {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-color: #bfdbfe;
+        }
+
+        .badge-pill.red {
+            background: #fef2f2;
+            color: #b91c1c;
+            border-color: #fecaca;
+        }
+
+        .badge-pill.green {
+            background: #f0fdf4;
+            color: #15803d;
+            border-color: #bbf7d0;
+        }
+
+        .badge-pill.black {
+            background: #f3f4f6;
+            color: #111827;
+            border-color: #d1d5db;
+        }
+
+        #btnRun {
+            background: #2563eb;
+            color: #ffffff;
+            border: none;
+            padding: 7px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        #btnRun:hover:not(:disabled) {
+            background: #1d4ed8;
+        }
+
+        #btnRun:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        #btnToggleAdv {
+            background: #e2e8f0;
+            color: #334155;
+            border: 1px solid #cbd5e1;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        #btnToggleAdv:hover {
+            background: #cbd5e1;
+        }
+
+        .btn-preset {
+            background: #f1f5f9;
+            color: #0f172a;
+            border: 1px solid #cbd5e1;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-preset:hover {
+            background: #e2e8f0;
+        }
+
+        #advancedRow {
+            display: none;
+            border-top: 1px dashed #cbd5e1;
+            padding-top: 8px;
+        }
+
+        #opencvStatus {
+            font-weight: bold;
+            color: #aa6600;
+        }
+
+        #opencvStatus.ready {
+            color: #008800;
+        }
+
+        button {
+            padding: 4px 12px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+        }
+
+        #log {
+            background: #f8f8f8;
+            border: 1px solid #ccc;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 130px;
+            overflow-y: auto;
+            margin-bottom: 16px;
+        }
+
+        #log .info {
+            color: #0000bb;
+        }
+
+        #log .ok {
+            color: #008800;
+        }
+
+        #log .warn {
+            color: #bb6600;
+        }
+
+        #log .err {
+            color: #cc0000;
+            font-weight: bold;
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px;
+        }
+
+        .step {
+            border: 1px solid #ccc;
+            background: #ffffff;
+        }
+
+        .step-header {
+            background: #eeeeee;
+            border-bottom: 1px solid #ccc;
+            padding: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .step-num {
+            border: 1px solid #888;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            background: #fff;
+            flex-shrink: 0;
+        }
+
+        .step-num.done {
+            background: #ddffdd;
+            border-color: #008800;
+            color: #006600;
+        }
+
+        .step-num.error {
+            background: #ffdddd;
+            border-color: #cc0000;
+            color: #cc0000;
+        }
+
+        .step-title {
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .step-desc {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .step-body {
+            padding: 8px;
+        }
+
+        .step-body canvas,
+        .step-body img,
+        .step-body svg {
+            max-width: 100%;
+            border: 1px solid #ccc;
+            display: block;
+        }
+
+        .step-meta {
+            font-size: 11px;
+            color: #555;
+            margin-top: 6px;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+
+        .step-empty {
+            font-size: 12px;
+            color: #888;
+            padding: 12px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Urumi Vision - 9-Stage Thin Stroke Detector Dry Run (Lasso ROI Zoom &amp; Bed Scaling)</h1>
+        <p class="sub">Crops and supersamples the Lasso / Auto-Detected cardboard ROI for high-resolution 9-stage Sato
+            Hessian ridge detection, then scales &amp; offsets vector coordinates back to the full 775×1065 mm ArUco
+            bed.</p>
+    </header>
+
+    <div id="toolbar">
+        <!-- Row 1: Primary Controls & Actions -->
+        <div class="tb-row">
+            <span id="opencvStatus">OpenCV loading...</span>
+
+            <div class="tb-group">
+                <span class="tb-group-title">Input</span>
+                <input type="file" id="fileInput" accept="image/*" disabled style="font-size: 12px;">
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-title">Presets</span>
+                <button type="button" class="btn-preset" id="presetFinePen">Fine Pen (Faint)</button>
+                <button type="button" class="btn-preset" id="presetMarker">Marker (Default)</button>
+                <button type="button" class="btn-preset" id="presetNoisy">Noisy Cardboard</button>
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-title">Active Tool Layers</span>
+                <label class="badge-pill blue">
+                    <input type="checkbox" id="penBlue" checked> Blue (Cut)
+                </label>
+                <label class="badge-pill red">
+                    <input type="checkbox" id="penRed" checked> Red (Score)
+                </label>
+                <label class="badge-pill green">
+                    <input type="checkbox" id="penGreen" checked> Green (Crease)
+                </label>
+                <label class="badge-pill black">
+                    <input type="checkbox" id="penBlack" checked> Black (Cut)
+                </label>
+            </div>
+
+            <button id="btnRun" disabled>Run 9-Stage Pipeline</button>
+            <button type="button" id="btnToggleAdv">Advanced Settings ▾</button>
+        </div>
+
+        <!-- Row 2: Standard Workpiece & Bed Options -->
+        <div class="tb-row">
+            <div class="tb-group">
+                <span class="tb-group-title">Bed Calibration</span>
+                <label title="Straighten perspective using ArUco markers on the cutting bed frame">
+                    <input type="checkbox" id="useAruco" checked> Flatten Bed (ArUco)
+                </label>
+                <span class="param-help"
+                    data-tooltip="Detects the 4 corner ArUco markers and flattens the image to 775x1065 mm bed space.">?</span>
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-title">Cardboard ROI</span>
+                <label title="Select workpiece bounding box detector">
+                    Method:
+                    <select id="roiDetectorSelect" style="padding: 2px 4px; font-size: 12px; margin-left: 2px;">
+                        <option value="contour" selected>Auto-Detect (Contours)</option>
+                        <option value="yolo">Auto-Detect (YOLO)</option>
+                        <option value="none">None (Full Bed)</option>
+                    </select>
+                </label>
+                <span class="param-help"
+                    data-tooltip="Finds the cardboard workpiece automatically to zoom in and eliminate outer bed clutter.">?</span>
+
+                <label style="margin-left: 6px;" title="Inner margin to ignore cardboard edge shadows">
+                    Edge Inset:
+                    <input type="number" id="roiInset" value="16" min="0" max="150" step="4"
+                        style="width: 48px; padding: 2px; font-size: 12px;"> px
+                </label>
+                <span class="param-help"
+                    data-tooltip="Shaves border pixels inward to prevent cardboard cut-edge shadows from registering as strokes.">?</span>
+
+                <label style="margin-left: 6px;" title="Review and adjust the detected crop boundary interactively">
+                    <input type="checkbox" id="useLasso" checked> Confirm with Lasso
+                </label>
+                <span class="param-help"
+                    data-tooltip="Opens an interactive window to verify or redraw the processing area before stroke detection.">?</span>
+            </div>
+        </div>
+
+        <!-- Row 3: Advanced Pipeline Tuning (Hidden by Default) -->
+        <div class="tb-row" id="advancedRow">
+            <div class="tb-group">
+                <span class="tb-group-title">Filter Scales (Sigmas)</span>
+                <input type="text" id="sigmaInput" value="1.5, 2.5"
+                    style="width: 72px; padding: 2px 4px; font-size: 12px;">
+                <span class="param-help"
+                    data-tooltip="Gaussian scales (px) for Sato Hessian ridge filter. Use '1.0, 1.8' for very thin ballpoint pens, '1.5, 2.5' for normal pens, '2.0, 3.5' for thick markers.">?</span>
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-title">Detection Thresholds</span>
+                <label title="Percentile thresholds for strong and weak stroke detection">
+                    High / Low %:
+                    <input type="number" id="hystHigh" value="97.0" min="75" max="99.5" step="0.5"
+                        style="width: 46px; padding: 2px; font-size: 12px;">
+                    /
+                    <input type="number" id="hystLow" value="90" min="55" max="98" step="1"
+                        style="width: 42px; padding: 2px; font-size: 12px;">
+                </label>
+                <span class="param-help"
+                    data-tooltip="Percentile cutoffs for hysteresis binarization. High threshold seeds stroke candidates; Low threshold connects faint continuing lines.">?</span>
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-title">Noise Suppression</span>
+                <label title="Minimum stroke length/diagonal in pixels">
+                    Min Size:
+                    <input type="number" id="minSpanPx" value="22" min="10" max="300" step="2"
+                        style="width: 44px; padding: 2px; font-size: 12px;"> px
+                </label>
+                <span class="param-help"
+                    data-tooltip="Discards isolated markings smaller than this pixel span. Rejects speckles and cardboard grain flutes.">?</span>
+
+                <label style="margin-left: 6px;" title="Length of false side whiskers to prune at intersections">
+                    Prune Spurs:
+                    <input type="number" id="spurLenPx" value="24" min="0" max="100" step="4"
+                        style="width: 44px; padding: 2px; font-size: 12px;"> px
+                </label>
+                <span class="param-help"
+                    data-tooltip="Removes skeleton dead-end branches shorter than this length at crossing junctions to avoid cutting tool stutter.">?</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="main">
+        <div id="log"><span class="info">&gt; Waiting for OpenCV to initialize...</span></div>
+
+        <div class="steps">
+            <div class="step" id="step-0">
+                <div class="step-header">
+                    <div class="step-num" id="num-0">0</div>
+                    <div>
+                        <div class="step-title">ArUco Flatten &amp; Lasso ROI Crop</div>
+                        <div class="step-desc">4-corner homography (775×1065 mm) + ROI crop &amp; zoom</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">No image loaded yet.</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-1">
+                <div class="step-header">
+                    <div class="step-num" id="num-1">1</div>
+                    <div>
+                        <div class="step-title">Stage 1: Capture &amp; Quality Gate (ROI)</div>
+                        <div class="step-desc">Laplacian blur score, brightness &amp; L &gt; 235 + border ignore-mask
+                        </div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-2">
+                <div class="step-header">
+                    <div class="step-num" id="num-2">2</div>
+                    <div>
+                        <div class="step-title">Stage 2: ROI Zoom &amp; Flat-Field</div>
+                        <div class="step-desc">Supersample ROI ~1000px (cubic), LAB L* + chroma flat-field, bilateral
+                        </div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-3">
+                <div class="step-header">
+                    <div class="step-num" id="num-3">3</div>
+                    <div>
+                        <div class="step-title">Stage 3: Multi-Scale Sato Ridge Enhancement</div>
+                        <div class="step-desc">Hessian eigenvalue ridge response on zoomed ROI normalized to 0..1</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-4">
+                <div class="step-header">
+                    <div class="step-num" id="num-4">4</div>
+                    <div>
+                        <div class="step-title">Stage 4: Hysteresis Threshold</div>
+                        <div class="step-desc">Percentile hysteresis + morphological close on zoomed ROI</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-5">
+                <div class="step-header">
+                    <div class="step-num" id="num-5">5</div>
+                    <div>
+                        <div class="step-title">Stage 5: Skeleton &amp; Perceptual Grouping</div>
+                        <div class="step-desc">1px Zhang-Suen skeletonize, component filtering &amp; branch tracing
+                        </div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-6">
+                <div class="step-header">
+                    <div class="step-num" id="num-6">6</div>
+                    <div>
+                        <div class="step-title">Stage 6: Vectorize &amp; Scale to Full Bed</div>
+                        <div class="step-desc">RDP simplification + map (x_work·scaleX + roiX, y_work·scaleY + roiY)
+                        </div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-7">
+                <div class="step-header">
+                    <div class="step-num" id="num-7">7</div>
+                    <div>
+                        <div class="step-title">Stage 7: Shape Model Selection</div>
+                        <div class="step-desc">Line → Circle → Ellipse → Sharp Polygon/Freehand on Zoomed ROI</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-8">
+                <div class="step-header">
+                    <div class="step-num" id="num-8">8</div>
+                    <div>
+                        <div class="step-title">Stage 8: Validation &amp; Confidence</div>
+                        <div class="step-desc">Inlier ratio, 10° angular coverage bins, fit residual &amp; contrast
+                        </div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-9">
+                <div class="step-header">
+                    <div class="step-num" id="num-9">9</div>
+                    <div>
+                        <div class="step-title">Stage 9: Final 4-Layer SVG &amp; JSON Output</div>
+                        <div class="step-desc">1:1 mm Full-Bed Layered SVG (&lt;g id="bed"&gt;, &lt;g id="red"&gt;,
+                            &lt;g id="green"&gt;, &lt;g id="blue"&gt;)</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-10" style="grid-column: 1 / -1;">
+                <div class="step-header">
+                    <div class="step-num" id="num-10">10</div>
+                    <div>
+                        <div class="step-title">Stage 10: Full-Resolution QC Overlay (50% Opacity)</div>
+                        <div class="step-desc">All 4 SVG layers rendered on top of the flattened ROI photo at ~50%
+                            opacity at full ROI resolution</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lasso Modal -->
+    <div id="lassoModal"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 1000; flex-direction: column;">
+        <div class="lasso-header"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #111;">
+            <div class="lasso-title"
+                style="color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                Select area to process
+            </div>
+            <div class="lasso-buttons" style="display: flex; gap: 12px;">
+                <button id="btnLassoRect"
+                    style="padding: 8px 16px; font-size: 13px; background: #222; color:white; border: 1px solid #444;">Rect</button>
+                <button id="btnLassoPoly"
+                    style="padding: 8px 16px; font-size: 13px; background: #222; color:white; border: 1px solid #444;">Poly</button>
+                <button id="btnLassoClear"
+                    style="padding: 8px 16px; font-size: 13px; background: #ef4444; color:white; border:none;">Clear</button>
+                <button id="btnLassoConfirm"
+                    style="padding: 8px 16px; font-size: 13px; background:#3b82f6; color:white; border:none;">Confirm
+                    &amp; Zoom ROI</button>
+            </div>
+        </div>
+        <div
+            style="flex: 1; overflow: hidden; position: relative; display: flex; justify-content: center; align-items: center; padding: 20px;">
+            <canvas id="lassoCanvas"
+                style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: crosshair; touch-action: none; border: 1px solid #333; background:#222;"></canvas>
+        </div>
+        <div style="color: #888; text-align: center; padding: 12px; font-size: 13px; background: #111;">
+            Draw around the cardboard or ink. The selected ROI will be cropped, zoomed in for detection, and scaled back
+            to full bed coordinates.
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="lib/trace_skeleton.js"></script>
+    <script src="pipeline/WarpEngine.js"></script>
+    <script src="pipeline/SvgGenerator.js"></script>
+    <script src="pipeline/CardboardDetector.js"></script>
+    <script src="pipeline/ContourRoiDetector.js"></script>
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
+
+    <script>
+        const log = document.getElementById('log');
+        function addLog(msg, cls = 'info') {
+            const el = document.createElement('div');
+            el.className = cls;
+            el.textContent = msg;
+            log.appendChild(el);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function setStep(id, done, err) {
+            const el = document.getElementById('num-' + id);
+            if (!el) return;
+            el.classList.remove('done', 'error');
+            if (err) { el.classList.add('error'); el.textContent = '✗'; }
+            else if (done) { el.classList.add('done'); el.textContent = '✓'; }
+        }
+
+        function showCanvas(stepId, mat, label, append = false) {
+            const body = document.querySelector('#step-' + stepId + ' .step-body');
+            const container = document.createElement('div');
+            container.style.marginBottom = '10px';
+            const c = document.createElement('canvas');
+            cv.imshow(c, mat);
+            const meta = document.createElement('div');
+            meta.className = 'step-meta';
+            meta.textContent = label || `${mat.cols} × ${mat.rows} px`;
+            if (!append) body.innerHTML = '';
+            container.appendChild(c);
+            container.appendChild(meta);
+            body.appendChild(container);
+            setStep(stepId, true);
+        }
+
+        function markReady() {
+            addLog('OpenCV.js ready.', 'ok');
+            const statusEl = document.getElementById('opencvStatus');
+            if (statusEl) {
+                statusEl.textContent = 'OpenCV ready';
+                statusEl.classList.add('ready');
+            }
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput) fileInput.disabled = false;
+            const btnRun = document.getElementById('btnRun');
+            if (btnRun) btnRun.disabled = false;
+        }
+
+        function onOpenCvReady() {
+            if (typeof cv !== 'undefined' && cv.Mat) {
+                markReady();
+            } else if (typeof cv !== 'undefined') {
+                cv['onRuntimeInitialized'] = () => {
+                    markReady();
+                };
+            }
+        }
+
+        if (typeof cv !== 'undefined' && cv.Mat) {
+            markReady();
+        }
+
+        // Toggle Advanced Tuning Controls
+        const btnToggleAdv = document.getElementById('btnToggleAdv');
+        const advancedRow = document.getElementById('advancedRow');
+        let advOpen = false;
+        btnToggleAdv.addEventListener('click', () => {
+            advOpen = !advOpen;
+            advancedRow.style.display = advOpen ? 'flex' : 'none';
+            btnToggleAdv.textContent = advOpen ? 'Advanced Settings ▴' : 'Advanced Settings ▾';
+        });
+
+        // Preset Configurations
+        function applyPreset(sigmas, highPct, lowPct, minSpan, spurLen) {
+            document.getElementById('sigmaInput').value = sigmas;
+            document.getElementById('hystHigh').value = highPct;
+            document.getElementById('hystLow').value = lowPct;
+            document.getElementById('minSpanPx').value = minSpan;
+            document.getElementById('spurLenPx').value = spurLen;
+            addLog(`Applied Preset: Sigmas=${sigmas}, Hyst=${highPct}/${lowPct}%, MinSpan=${minSpan}px, Spurs=${spurLen}px`, 'info');
+        }
+
+        document.getElementById('presetFinePen').addEventListener('click', () => {
+            applyPreset('1.0, 1.8', 95.0, 85, 16, 16);
+        });
+        document.getElementById('presetMarker').addEventListener('click', () => {
+            applyPreset('1.5, 2.5', 97.0, 90, 22, 24);
+        });
+        document.getElementById('presetNoisy').addEventListener('click', () => {
+            applyPreset('2.0, 3.0', 98.0, 92, 30, 28);
+        });
+
+        let loadedImg = null;
+        window.addEventListener('DOMContentLoaded', () => {
+            const img = new Image();
+            img.onload = () => {
+                loadedImg = img;
+                const body = document.querySelector('#step-0 .step-body');
+                body.innerHTML = '';
+                const el = document.createElement('img');
+                el.src = img.src;
+                body.appendChild(el);
+                setStep('0', true);
+                addLog(`Default image loaded: shapes.jpg (${img.width}×${img.height})`, 'ok');
+            };
+            img.onerror = () => {
+                img.src = 'test_images/2_colour_test.jpg';
+            };
+            img.src = 'test_images/shapes.jpg';
+        });
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                loadedImg = img;
+                URL.revokeObjectURL(url);
+                const body = document.querySelector('#step-0 .step-body');
+                body.innerHTML = '';
+                const el = document.createElement('img');
+                el.src = img.src;
+                body.appendChild(el);
+                setStep('0', true);
+                addLog(`Image loaded: ${file.name} (${img.width}×${img.height})`, 'ok');
+            };
+            img.src = url;
+        });
+
+        function openLassoToolAsync(warpedMat, initialBox = null) {
+            return new Promise((resolve) => {
+                const lassoModal = document.getElementById('lassoModal');
+                const lassoCanvas = document.getElementById('lassoCanvas');
+                const lassoTitle = document.querySelector('.lasso-title');
+                const btnPoly = document.getElementById('btnLassoPoly');
+                const btnRect = document.getElementById('btnLassoRect');
+                const btnClear = document.getElementById('btnLassoClear');
+                const btnConfirm = document.getElementById('btnLassoConfirm');
+
+                lassoModal.style.display = 'flex';
+                const ctx = lassoCanvas.getContext('2d');
+
+                const offscreen = document.createElement('canvas');
+                cv.imshow(offscreen, warpedMat);
+
+                const displayWidth = window.innerWidth * 0.9;
+                const displayHeight = window.innerHeight * 0.72;
+                const scale = Math.min(displayWidth / warpedMat.cols, displayHeight / warpedMat.rows);
+
+                lassoCanvas.width = warpedMat.cols * scale;
+                lassoCanvas.height = warpedMat.rows * scale;
+
+                let currentMode = 'poly';
+                let points = [];
+                let isDrawing = false;
+                let rectStart = null;
+                let rectEnd = null;
+
+                if (initialBox) {
+                    const label = initialBox.type === 'contour' ? 'OpenCV Contours' : 'YOLO';
+                    lassoTitle.textContent = `Auto-Detected ROI (${label}). Confirm or adjust to zoom:`;
+                    currentMode = 'rect';
+                    rectStart = { x: initialBox.x * scale, y: initialBox.y * scale };
+                    rectEnd = { x: (initialBox.x + initialBox.width) * scale, y: (initialBox.y + initialBox.height) * scale };
+                } else {
+                    lassoTitle.textContent = "Select area to zoom and process";
+                    currentMode = 'poly';
+                }
+
+                function render() {
+                    ctx.clearRect(0, 0, lassoCanvas.width, lassoCanvas.height);
+                    ctx.drawImage(offscreen, 0, 0, lassoCanvas.width, lassoCanvas.height);
+
+                    if (points.length > 2 || (rectStart && rectEnd)) {
+                        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+                        ctx.fillRect(0, 0, lassoCanvas.width, lassoCanvas.height);
+                        ctx.save();
+                        ctx.beginPath();
+                        if (currentMode === 'poly' && points.length > 0) {
+                            ctx.moveTo(points[0].x, points[0].y);
+                            for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+                            ctx.closePath();
+                        } else if (rectStart && rectEnd) {
+                            ctx.rect(rectStart.x, rectStart.y, rectEnd.x - rectStart.x, rectEnd.y - rectStart.y);
+                        }
+                        ctx.clip();
+                        ctx.drawImage(offscreen, 0, 0, lassoCanvas.width, lassoCanvas.height);
+                        ctx.restore();
+                    }
+
+                    ctx.strokeStyle = '#3B82F6';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    if (currentMode === 'poly' && points.length > 0) {
+                        ctx.moveTo(points[0].x, points[0].y);
+                        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+                        if (points.length > 2) ctx.closePath();
+                        ctx.stroke();
+                    } else if (rectStart && rectEnd) {
+                        ctx.strokeRect(rectStart.x, rectStart.y, rectEnd.x - rectStart.x, rectEnd.y - rectStart.y);
+                    }
+                }
+
+                render();
+
+                const setMode = (mode) => {
+                    currentMode = mode;
+                    if (mode === 'poly' && rectStart) {
+                        points = [];
+                        rectStart = null; rectEnd = null;
+                    }
+                    btnPoly.style.borderColor = mode === 'poly' ? '#3B82F6' : '#444';
+                    btnRect.style.borderColor = mode === 'rect' ? '#3B82F6' : '#444';
+                    render();
+                };
+                btnPoly.onclick = () => setMode('poly');
+                btnRect.onclick = () => setMode('rect');
+                btnPoly.style.borderColor = currentMode === 'poly' ? '#3B82F6' : '#444';
+                btnRect.style.borderColor = currentMode === 'rect' ? '#3B82F6' : '#444';
+                btnClear.onclick = () => { points = []; rectStart = null; rectEnd = null; render(); };
+
+                const getPos = (e) => {
+                    const rect = lassoCanvas.getBoundingClientRect();
+                    let clientX = e.clientX, clientY = e.clientY;
+                    if (e.touches && e.touches.length > 0) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+                    return {
+                        x: (clientX - rect.left) * (lassoCanvas.width / rect.width),
+                        y: (clientY - rect.top) * (lassoCanvas.height / rect.height)
+                    };
+                };
+
+                lassoCanvas.onmousedown = lassoCanvas.ontouchstart = (e) => {
+                    e.preventDefault();
+                    const pos = getPos(e);
+                    if (currentMode === 'poly') points.push(pos);
+                    else { isDrawing = true; rectStart = pos; rectEnd = pos; }
+                    render();
+                };
+
+                lassoCanvas.onmousemove = lassoCanvas.ontouchmove = (e) => {
+                    e.preventDefault();
+                    if (!isDrawing || currentMode !== 'rect') return;
+                    rectEnd = getPos(e);
+                    render();
+                };
+
+                lassoCanvas.onmouseup = lassoCanvas.ontouchend = () => { isDrawing = false; };
+
+                btnConfirm.onclick = () => {
+                    try {
+                        lassoModal.style.display = 'none';
+                        btnPoly.onclick = btnRect.onclick = btnClear.onclick = btnConfirm.onclick = null;
+                        lassoCanvas.onmousedown = lassoCanvas.onmousemove = lassoCanvas.onmouseup = null;
+                        lassoCanvas.ontouchstart = lassoCanvas.ontouchmove = lassoCanvas.ontouchend = null;
+
+                        let maskMat = cv.Mat.zeros(warpedMat.rows, warpedMat.cols, cv.CV_8UC1);
+                        const scaleX = warpedMat.cols / lassoCanvas.width;
+                        const scaleY = warpedMat.rows / lassoCanvas.height;
+
+                        if ((currentMode === 'poly' && points.length > 2) || (rectStart && rectEnd)) {
+                            let pointArray = [];
+                            if (currentMode === 'poly') {
+                                for (let pt of points) {
+                                    pointArray.push(Math.round(pt.x * scaleX), Math.round(pt.y * scaleY));
+                                }
+                            } else {
+                                pointArray.push(
+                                    Math.round(rectStart.x * scaleX), Math.round(rectStart.y * scaleY),
+                                    Math.round(rectEnd.x * scaleX), Math.round(rectStart.y * scaleY),
+                                    Math.round(rectEnd.x * scaleX), Math.round(rectEnd.y * scaleY),
+                                    Math.round(rectStart.x * scaleX), Math.round(rectEnd.y * scaleY)
+                                );
+                            }
+
+                            let ptMat = cv.matFromArray(pointArray.length / 2, 1, cv.CV_32SC2, pointArray);
+                            let pointVector = new cv.MatVector();
+                            pointVector.push_back(ptMat);
+                            cv.fillPoly(maskMat, pointVector, new cv.Scalar(255, 255, 255, 255));
+                            ptMat.delete(); pointVector.delete();
+                            resolve(maskMat);
+                        } else {
+                            maskMat.delete();
+                            resolve(null);
+                        }
+                    } catch (e) {
+                        addLog('Lasso Tool Error: ' + e.message, 'err');
+                        console.error(e);
+                        resolve(null);
+                    }
+                };
+            });
+        }
+
+        // Compute bounding box of non-zero pixels in a single-channel mask
+        function getMaskBoundingBox(maskMat) {
+            const rows = maskMat.rows, cols = maskMat.cols;
+            const data = maskMat.data;
+            let minX = cols, minY = rows, maxX = -1, maxY = -1;
+            for (let y = 0; y < rows; y++) {
+                const rowOff = y * cols;
+                for (let x = 0; x < cols; x++) {
+                    if (data[rowOff + x] > 0) {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+            if (maxX < minX || maxY < minY) return null;
+            return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+        }
+
+        // Compute multi-scale Sato 2D Hessian ridge filter (matching stroke_detector/stages.py _fast_sato_2d)
+        function computeSatoStrokeness(flatMat, ignoreMaskU8, sigmas) {
+            const rows = flatMat.rows, cols = flatMat.cols;
+            const outMax = new Float32Array(rows * cols);
+            let dxx = new cv.Mat(), dyy = new cv.Mat(), dxy = new cv.Mat(), blurred = new cv.Mat();
+
+            for (let s of sigmas) {
+                cv.GaussianBlur(flatMat, blurred, new cv.Size(0, 0), s, s);
+                cv.Sobel(blurred, dxx, cv.CV_32F, 2, 0, 3);
+                cv.Sobel(blurred, dyy, cv.CV_32F, 0, 2, 3);
+                cv.Sobel(blurred, dxy, cv.CV_32F, 1, 1, 3);
+
+                // Match Python sobel_norm = 0.25 for ksize=3 2nd derivative
+                const s2 = s * s * 0.25;
+                const hx = dxx.data32F, hy = dyy.data32F, hxy = dxy.data32F;
+                for (let i = 0; i < hx.length; i++) {
+                    if (ignoreMaskU8[i] > 0) continue;
+                    const a = hx[i] * s2, b = hy[i] * s2, c = hxy[i] * s2;
+                    const tr = a + b;
+                    const det = Math.hypot(a - b, 2 * c);
+                    // Dark ridge curvature eigenvalue lambda1 > 0
+                    const lambda1 = 0.5 * (tr + det);
+                    if (lambda1 > outMax[i]) outMax[i] = lambda1;
+                }
+            }
+            dxx.delete(); dyy.delete(); dxy.delete(); blurred.delete();
+
+            let maxVal = 0;
+            const sub = [];
+            for (let i = 0; i < outMax.length; i++) {
+                if (ignoreMaskU8[i] > 0) {
+                    outMax[i] = 0;
+                    continue;
+                }
+                if (outMax[i] > maxVal) maxVal = outMax[i];
+                if ((i & 3) === 0) sub.push(outMax[i]);
+            }
+
+            let p50 = 0, p70 = 0, p80 = 0, p95 = 0, p995 = 0, p999 = 0;
+            let snr95 = 0, snr80 = 0, snr70 = 0;
+            if (sub.length > 0) {
+                sub.sort((x, y) => x - y);
+                const pct = (q) => sub[Math.min(sub.length - 1, Math.floor(sub.length * q))];
+                p50 = pct(0.50);
+                p70 = pct(0.70);
+                p80 = pct(0.80);
+                p95 = pct(0.95);
+                p995 = pct(0.995);
+                p999 = pct(0.999);
+                snr95 = (p999 - p50) / Math.max(1e-6, p95 - p50);
+                snr80 = (p999 - p50) / Math.max(1e-6, p80 - p50);
+                snr70 = (p999 - p50) / Math.max(1e-6, p70 - p50);
+            }
+
+            const normU8 = new Uint8Array(rows * cols);
+            const isPureTexture = maxVal < 0.22 || (snr95 < 3.6 && snr80 < 22.0 && snr70 < 32.0);
+            if (!isPureTexture) {
+                const normDenom = Math.max(1e-6, Math.max(p995, maxVal * 0.72));
+                const flatData = flatMat.data32F;
+                for (let i = 0; i < outMax.length; i++) {
+                    if (ignoreMaskU8[i] > 0) continue;
+                    let v = Math.min(1.0, Math.max(0.0, outMax[i] / normDenom));
+                    // Fuse flat-field ink darkness to eliminate black islands inside thick ink junctions and apex
+                    const inkDark = Math.max(0, -flatData[i]);
+                    if (inkDark > 6.0) {
+                        const inkScore = Math.min(1.0, (inkDark - 6.0) / 16.0);
+                        if (inkScore > v) v = inkScore;
+                    }
+                    outMax[i] = v;
+                    normU8[i] = Math.min(255, Math.round(v * 255));
+                }
+            } else {
+                outMax.fill(0);
+            }
+            return { floatMap: outMax, u8Map: normU8, rawMax: maxVal };
+        }
+
+        // Match the Python pipeline's robust noise estimator.  Percentiles are
+        // useful for display, but are not stable when a sparse drawing leaves
+        // nearly the entire ROI as corrugated-cardboard background.
+        function medianAndMad(values) {
+            if (!values.length) return { median: 0, sigma: 0 };
+            const sorted = Array.from(values).sort((a, b) => a - b);
+            const median = sorted[Math.floor(sorted.length / 2)];
+            const deviations = sorted.map(v => Math.abs(v - median)).sort((a, b) => a - b);
+            return { median, sigma: 1.4826 * deviations[Math.floor(deviations.length / 2)] };
+        }
+
+        // Fill small interior pinholes (< maxHoleArea px^2) inside binary stroke mask so thick junctions
+        // (such as the apex of a thick arrow) do not produce topological skeleton loops/rings.
+        function fillSmallMaskHoles(maskMat, maxHoleArea = 200) {
+            const rows = maskMat.rows, cols = maskMat.cols;
+            let inv = new cv.Mat();
+            cv.bitwise_not(maskMat, inv);
+            let hLabels = new cv.Mat(), hStats = new cv.Mat(), hCent = new cv.Mat();
+            const nHoles = cv.connectedComponentsWithStats(inv, hLabels, hStats, hCent, 4, cv.CV_32S);
+            const fillHole = new Uint8Array(nHoles);
+            for (let h = 1; h < nHoles; h++) {
+                const area = hStats.intPtr(h, cv.CC_STAT_AREA)[0];
+                const left = hStats.intPtr(h, cv.CC_STAT_LEFT)[0];
+                const top = hStats.intPtr(h, cv.CC_STAT_TOP)[0];
+                const w = hStats.intPtr(h, cv.CC_STAT_WIDTH)[0];
+                const ht = hStats.intPtr(h, cv.CC_STAT_HEIGHT)[0];
+                const touchesBorder = (left <= 0 || top <= 0 || (left + w) >= cols || (top + ht) >= rows);
+                if (!touchesBorder && area < maxHoleArea) {
+                    fillHole[h] = 1;
+                }
+            }
+            const lblData = hLabels.data32S, mData = maskMat.data;
+            for (let i = 0; i < lblData.length; i++) {
+                if (fillHole[lblData[i]]) mData[i] = 255;
+            }
+            inv.delete(); hLabels.delete(); hStats.delete(); hCent.delete();
+        }
+
+        // Ramer-Douglas-Peucker simplification (uses OpenCV approxPolyDP for closed polygons to avoid start-vertex seam)
+        function rdpSimplify(pts, epsilon, isClosed = false) {
+            if (pts.length <= 2) return pts.slice();
+            if (isClosed && pts.length > 4) {
+                const openPts = (Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 1.5)
+                    ? pts.slice(0, -1) : pts;
+                const flat = new Float32Array(openPts.length * 2);
+                for (let i = 0; i < openPts.length; i++) {
+                    flat[2 * i] = openPts[i][0];
+                    flat[2 * i + 1] = openPts[i][1];
+                }
+                let srcM = cv.matFromArray(openPts.length, 1, cv.CV_32FC2, flat);
+                let approxM = new cv.Mat();
+                cv.approxPolyDP(srcM, approxM, epsilon, true);
+                const out = [];
+                for (let i = 0; i < approxM.rows; i++) {
+                    out.push([approxM.data32F[2 * i], approxM.data32F[2 * i + 1]]);
+                }
+                srcM.delete(); approxM.delete();
+                if (out.length >= 3) out.push([out[0][0], out[0][1]]);
+                return out;
+            }
+            let dmax = 0, index = 0;
+            const end = pts.length - 1;
+            const x1 = pts[0][0], y1 = pts[0][1], x2 = pts[end][0], y2 = pts[end][1];
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.hypot(dx, dy);
+            for (let i = 1; i < end; i++) {
+                let d;
+                if (len < 1e-6) {
+                    d = Math.hypot(pts[i][0] - x1, pts[i][1] - y1);
+                } else {
+                    d = Math.abs(dy * pts[i][0] - dx * pts[i][1] + x2 * y1 - y2 * x1) / len;
+                }
+                if (d > dmax) { index = i; dmax = d; }
+            }
+            if (dmax > epsilon) {
+                const r1 = rdpSimplify(pts.slice(0, index + 1), epsilon, false);
+                const r2 = rdpSimplify(pts.slice(index, end + 1), epsilon, false);
+                return r1.slice(0, r1.length - 1).concat(r2);
+            }
+            return [pts[0], pts[end]];
+        }
+
+        // Densify a polyline to ~2px steps so geometric fitting is not biased by sparse vertices
+        function densifyPolyline(pts, stepPx = 2.0) {
+            if (pts.length < 2) return pts.slice();
+            const dense = [pts[0]];
+            for (let i = 1; i < pts.length; i++) {
+                const x0 = pts[i - 1][0], y0 = pts[i - 1][1];
+                const x1 = pts[i][0], y1 = pts[i][1];
+                const segLen = Math.hypot(x1 - x0, y1 - y0);
+                const steps = Math.max(1, Math.round(segLen / stepPx));
+                for (let s = 1; s <= steps; s++) {
+                    const t = s / steps;
+                    dense.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t]);
+                }
+            }
+            return dense;
+        }
+
+        // Minimum interior turn angle (degrees) along a simplified polyline after collapsing tiny corner bevels
+        function minInteriorAngleDeg(poly, isClosed = false, minSeg = 5.5) {
+            let pts = isClosed && poly.length > 3 ? poly.slice(0, -1) : poly.slice();
+            if (pts.length < 3) return 180.0;
+            const clean = [pts[0]];
+            for (let i = 1; i < pts.length; i++) {
+                if (Math.hypot(pts[i][0] - clean[clean.length - 1][0], pts[i][1] - clean[clean.length - 1][1]) >= minSeg) {
+                    clean.push(pts[i]);
+                }
+            }
+            if (isClosed && clean.length > 3 && Math.hypot(clean[clean.length - 1][0] - clean[0][0], clean[clean.length - 1][1] - clean[0][1]) < minSeg) {
+                clean.pop();
+            }
+            pts = clean;
+            const m = pts.length;
+            if (m < 3) return 180.0;
+            let minAng = 180.0;
+            const count = isClosed ? m : m - 2;
+            for (let idx = 0; idx < count; idx++) {
+                const pPrev = isClosed ? pts[(idx - 1 + m) % m] : pts[idx];
+                const pCur = isClosed ? pts[idx] : pts[idx + 1];
+                const pNext = isClosed ? pts[(idx + 1) % m] : pts[idx + 2];
+                const v1x = pPrev[0] - pCur[0], v1y = pPrev[1] - pCur[1];
+                const v2x = pNext[0] - pCur[0], v2y = pNext[1] - pCur[1];
+                const n1 = Math.hypot(v1x, v1y), n2 = Math.hypot(v2x, v2y);
+                if (n1 < 3.0 || n2 < 3.0) continue;
+                const cosA = Math.max(-1.0, Math.min(1.0, (v1x * v2x + v1y * v2y) / (n1 * n2)));
+                const ang = Math.acos(cosA) * 180.0 / Math.PI;
+                if (ang < minAng) minAng = ang;
+            }
+            return minAng;
+        }
+
+        // Stage 7: Fit line, circle, ellipse, or sharp-corner-preserving polygon/freehand
+        function fitGeometricModel(densePts, simpPts, isClosed = false) {
+            const dense = (densePts && densePts.length >= 4) ? densePts : densifyPolyline(simpPts, 2.0);
+            const n = dense.length;
+            const simp = simpPts || rdpSimplify(dense, isClosed ? 2.5 : 0.8, isClosed);
+            if (n < 4) {
+                return { type: 'freehand', params: { vertices: simp.length }, fitError: 0.5, inlierRatio: 1, coverage: 180, workPoints: simp };
+            }
+
+            let mx = 0, my = 0;
+            for (let p of dense) { mx += p[0]; my += p[1]; }
+            mx /= n; my /= n;
+            const endGap = Math.hypot(dense[n - 1][0] - dense[0][0], dense[n - 1][1] - dense[0][1]);
+
+            if (!isClosed) {
+                let sxx = 0, syy = 0, sxy = 0;
+                for (let p of dense) {
+                    const dx = p[0] - mx, dy = p[1] - my;
+                    sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+                }
+                const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+                const vx = Math.cos(theta), vy = Math.sin(theta);
+                const nx = -vy, ny = vx;
+                let lineErrSum = 0, lineInliers = 0, tMin = Infinity, tMax = -Infinity;
+                let signChanges = 0, prevCross = 0;
+                for (let p of dense) {
+                    const dx = p[0] - mx, dy = p[1] - my;
+                    const side = dx * nx + dy * ny;
+                    const d = Math.abs(side);
+                    const t = dx * vx + dy * vy;
+                    if (t < tMin) tMin = t;
+                    if (t > tMax) tMax = t;
+                    lineErrSum += d;
+                    if (d <= 2.5) lineInliers++;
+                    if (d > 1.2) {
+                        const curr = side > 0 ? 1 : -1;
+                        if (prevCross !== 0 && curr !== prevCross) signChanges++;
+                        prevCross = curr;
+                    }
+                }
+                const lineErr = lineErrSum / n;
+                const lineInlierRatio = lineInliers / n;
+                if (signChanges <= 2 && lineErr <= 2.8 && lineInlierRatio >= 0.65 && endGap > 12) {
+                    const t0 = (dense[0][0] - mx) * vx + (dense[0][1] - my) * vy;
+                    const tn = (dense[n - 1][0] - mx) * vx + (dense[n - 1][1] - my) * vy;
+                    tMin = Math.min(tMin, t0, tn);
+                    tMax = Math.max(tMax, t0, tn);
+                    let p1 = [mx + tMin * vx, my + tMin * vy];
+                    let p2 = [mx + tMax * vx, my + tMax * vy];
+                    const d1_0 = Math.hypot(p1[0] - dense[0][0], p1[1] - dense[0][1]);
+                    const d1_n = Math.hypot(p1[0] - dense[n - 1][0], p1[1] - dense[n - 1][1]);
+                    if (d1_0 <= d1_n) {
+                        if (d1_0 < 28.0) p1 = [dense[0][0], dense[0][1]];
+                        if (Math.hypot(p2[0] - dense[n - 1][0], p2[1] - dense[n - 1][1]) < 28.0) p2 = [dense[n - 1][0], dense[n - 1][1]];
+                    } else {
+                        if (d1_n < 28.0) p1 = [dense[n - 1][0], dense[n - 1][1]];
+                        if (Math.hypot(p2[0] - dense[0][0], p2[1] - dense[0][1]) < 28.0) p2 = [dense[0][0], dense[0][1]];
+                    }
+                    return {
+                        type: 'line',
+                        params: { x1: +p1[0].toFixed(1), y1: +p1[1].toFixed(1), x2: +p2[0].toFixed(1), y2: +p2[1].toFixed(1) },
+                        fitError: lineErr,
+                        inlierRatio: lineInlierRatio,
+                        coverage: 180,
+                        workPoints: [p1, p2]
+                    };
+                }
+            }
+
+            // Guard sharp-cornered closed polygons (triangles, squares, pentagons) against circle/ellipse smoothing
+            const minCornerDeg = minInteriorAngleDeg(simp, isClosed, 5.5);
+            const isSharpPolygon = isClosed && simp.length >= 3 && simp.length <= 8 && minCornerDeg <= 126.0;
+
+            if (!isSharpPolygon && (isClosed || endGap < 25) && n >= 16 && simp.length >= 6) {
+                let sux = 0, suy = 0, sux2 = 0, suy2 = 0, suxy = 0, suz = 0, suxz = 0, suyz = 0;
+                for (let p of dense) {
+                    const x = p[0] - mx, y = p[1] - my;
+                    const z = x * x + y * y;
+                    sux += x; suy += y; sux2 += x * x; suy2 += y * y; suxy += x * y;
+                    suz += z; suxz += x * z; suyz += y * z;
+                }
+                const det = sux2 * suy2 - suxy * suxy;
+                if (Math.abs(det) > 1e-6) {
+                    const uc = 0.5 * (suxz * suy2 - suyz * suxy) / det;
+                    const vc = 0.5 * (sux2 * suyz - suxy * suxz) / det;
+                    const r = Math.sqrt(Math.max(1, uc * uc + vc * vc + (sux2 + suy2) / n));
+                    const cx = mx + uc, cy = my + vc;
+                    let cErrSum = 0, cInliers = 0;
+                    const bins = new Set();
+                    for (let p of dense) {
+                        const d = Math.abs(Math.hypot(p[0] - cx, p[1] - cy) - r);
+                        cErrSum += d;
+                        if (d <= Math.max(2.8, r * 0.065)) cInliers++;
+                        const ang = ((Math.atan2(p[1] - cy, p[0] - cx) * 180 / Math.PI) + 360) % 360;
+                        bins.add(Math.floor(ang / 10));
+                    }
+                    const cErr = cErrSum / n;
+                    const cInlierRatio = cInliers / n;
+                    const cov = bins.size * 10;
+                    if (cErr <= Math.max(3.0, r * 0.065) && cInlierRatio >= 0.80 && cov >= 260) {
+                        const circPts = [];
+                        for (let k = 0; k <= 72; k++) {
+                            const aRad = (k / 72) * 2 * Math.PI;
+                            circPts.push([cx + r * Math.cos(aRad), cy + r * Math.sin(aRad)]);
+                        }
+                        return {
+                            type: 'circle',
+                            params: { cx: +cx.toFixed(1), cy: +cy.toFixed(1), r: +r.toFixed(1) },
+                            fitError: cErr,
+                            inlierRatio: cInlierRatio,
+                            coverage: cov,
+                            workPoints: circPts
+                        };
+                    }
+                }
+
+                // Ellipse fallback for hand-drawn oval circles (e.g. top-right green circle)
+                if (n >= 20) {
+                    const flatPts = new Float32Array(n * 2);
+                    for (let i = 0; i < n; i++) {
+                        flatPts[2 * i] = dense[i][0];
+                        flatPts[2 * i + 1] = dense[i][1];
+                    }
+                    let eMat = cv.matFromArray(n, 1, cv.CV_32FC2, flatPts);
+                    try {
+                        const rr = cv.fitEllipse(eMat);
+                        const ecx = rr.center.x, ecy = rr.center.y;
+                        const rx = rr.size.width * 0.5, ry = rr.size.height * 0.5;
+                        const angDeg = rr.angle;
+                        const angRad = angDeg * Math.PI / 180.0;
+                        const cosA = Math.cos(angRad), sinA = Math.sin(angRad);
+                        const rMax = Math.max(rx, ry), rMin = Math.min(rx, ry);
+                        if (rMin >= 6.0 && rMax / rMin <= 4.0) {
+                            let eErrSum = 0, eInliers = 0;
+                            const eBins = new Set();
+                            for (let p of dense) {
+                                const dx = p[0] - ecx, dy = p[1] - ecy;
+                                const ux = dx * cosA + dy * sinA;
+                                const uy = -dx * sinA + dy * cosA;
+                                const phi = Math.atan2(uy / ry, ux / rx);
+                                const ex = rx * Math.cos(phi), ey = ry * Math.sin(phi);
+                                const d = Math.hypot(ux - ex, uy - ey);
+                                eErrSum += d;
+                                if (d <= Math.max(2.8, rMax * 0.065)) eInliers++;
+                                const deg = ((phi * 180 / Math.PI) + 360) % 360;
+                                eBins.add(Math.floor(deg / 10));
+                            }
+                            const eErr = eErrSum / n;
+                            const eInlierRatio = eInliers / n;
+                            const eCov = eBins.size * 10;
+                            if (eErr <= Math.max(3.0, rMax * 0.065) && eInlierRatio >= 0.80 && eCov >= 260) {
+                                const ellPts = [];
+                                for (let k = 0; k <= 72; k++) {
+                                    const phi = (k / 72) * 2 * Math.PI;
+                                    const lx = rx * Math.cos(phi), ly = ry * Math.sin(phi);
+                                    ellPts.push([ecx + lx * cosA - ly * sinA, ecy + lx * sinA + ly * cosA]);
+                                }
+                                eMat.delete();
+                                return {
+                                    type: 'ellipse',
+                                    params: { cx: +ecx.toFixed(1), cy: +ecy.toFixed(1), rx: +rx.toFixed(1), ry: +ry.toFixed(1), angle_deg: +angDeg.toFixed(1) },
+                                    fitError: eErr,
+                                    inlierRatio: eInlierRatio,
+                                    coverage: eCov,
+                                    workPoints: ellPts
+                                };
+                            }
+                        }
+                    } catch (_err) {
+                        // Ignore degenerate point configurations in fitEllipse
+                    }
+                    eMat.delete();
+                }
+            }
+
+            return {
+                type: 'freehand',
+                params: { vertices: simp.length },
+                fitError: 0.9,
+                inlierRatio: 0.94,
+                coverage: 180,
+                workPoints: simp
+            };
+        }
+
+        // Remove 1-px degree-2 staircase/pimple pixels whose two neighbors are already 8-adjacent (including 2-px end-caps)
+        function removeSkeletonPimples(arr, w, h) {
+            const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+            let anyChanged = false;
+            for (let pass = 0; pass < 3; pass++) {
+                let changed = false;
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        if (!arr[y * w + x]) continue;
+                        const nbs = [];
+                        for (let d of dirs) {
+                            const nx = x + d[0], ny = y + d[1];
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h && arr[ny * w + nx]) {
+                                nbs.push([nx, ny]);
+                            }
+                        }
+                        if (nbs.length === 2) {
+                            const [x1, y1] = nbs[0], [x2, y2] = nbs[1];
+                            if (Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2)) <= 1) {
+                                arr[y * w + x] = 0;
+                                changed = true;
+                                anyChanged = true;
+                            }
+                        }
+                    }
+                }
+                if (!changed) break;
+            }
+            return anyChanged;
+        }
+
+        // Alternately remove 3-clique pimples (including 2-px Zhang-Suen end-caps) and degree-1 endpoints
+        function peelSpursAndPimples(arr, w, h, iters) {
+            const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+            for (let it = 0; it < iters; it++) {
+                const pChanged = removeSkeletonPimples(arr, w, h);
+                const toZero = [];
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        if (!arr[y * w + x]) continue;
+                        let deg = 0;
+                        for (let d of dirs) {
+                            const nx = x + d[0], ny = y + d[1];
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h && arr[ny * w + nx]) deg++;
+                        }
+                        if (deg === 1) toZero.push(y * w + x);
+                    }
+                }
+                if (toZero.length === 0 && !pChanged) break;
+                for (let idx of toZero) arr[idx] = 0;
+            }
+            removeSkeletonPimples(arr, w, h);
+        }
+
+        // Remove short dead-end hairs (<= maxHairLen px) attached to degree>=3 junctions without shortening genuine open strokes
+        function pruneJunctionHairs(arr, w, h, maxHairLen = 12) {
+            const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+            removeSkeletonPimples(arr, w, h);
+            for (let pass = 0; pass < 2; pass++) {
+                const deg = new Uint8Array(w * h);
+                let maxDeg = 0;
+                const endpoints = [];
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        if (!arr[y * w + x]) continue;
+                        let dCnt = 0;
+                        for (let d of dirs) {
+                            const nx = x + d[0], ny = y + d[1];
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h && arr[ny * w + nx]) dCnt++;
+                        }
+                        deg[y * w + x] = dCnt;
+                        if (dCnt > maxDeg) maxDeg = dCnt;
+                        if (dCnt === 1) endpoints.push([x, y]);
+                    }
+                }
+                if (maxDeg < 3 || endpoints.length === 0) break;
+                let removedAny = false;
+                for (let [sx, sy] of endpoints) {
+                    if (!arr[sy * w + sx]) continue;
+                    const path = [sy * w + sx];
+                    let cx = sx, cy = sy, px = -1, py = -1;
+                    let hitJunc = false;
+                    for (let step = 0; step < maxHairLen; step++) {
+                        let nxt = null;
+                        for (let d of dirs) {
+                            const nx = cx + d[0], ny = cy + d[1];
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h && arr[ny * w + nx] && (nx !== px || ny !== py)) {
+                                nxt = [nx, ny];
+                                break;
+                            }
+                        }
+                        if (!nxt) break;
+                        const [nx, ny] = nxt;
+                        if (deg[ny * w + nx] >= 3) {
+                            hitJunc = true;
+                            break;
+                        }
+                        path.push(ny * w + nx);
+                        px = cx; py = cy; cx = nx; cy = ny;
+                    }
+                    if (hitJunc && path.length <= maxHairLen) {
+                        for (let idx of path) arr[idx] = 0;
+                        removedAny = true;
+                    }
+                }
+                removeSkeletonPimples(arr, w, h);
+                if (!removedAny) break;
+            }
+        }
+
+        // Connect nearby collinear endpoints or short corner/V-valley gaps across distinct components
+        function linkSkeletonEndpoints(boolArr, w, h, maxDist = 18.0, minCos = 0.70, maxCornerDist = 18.0) {
+            const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+            const eps = [];
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    if (!boolArr[y * w + x]) continue;
+                    let deg = 0;
+                    for (let d of dirs) {
+                        const nx = x + d[0], ny = y + d[1];
+                        if (nx >= 0 && nx < w && ny >= 0 && ny < h && boolArr[ny * w + nx]) deg++;
+                    }
+                    if (deg === 1) eps.push([x, y]);
+                }
+            }
+            const nEp = eps.length;
+            if (nEp < 2 || nEp > 250) return;
+
+            const tangents = [];
+            const validEp = new Uint8Array(nEp);
+            for (let i = 0; i < nEp; i++) {
+                let [cx, cy] = eps[i];
+                let px = cx, py = cy, curX = cx, curY = cy;
+                for (let s = 0; s < 6; s++) {
+                    let found = false;
+                    for (let d of dirs) {
+                        const nx = curX + d[0], ny = curY + d[1];
+                        if (nx >= 0 && nx < w && ny >= 0 && ny < h && boolArr[ny * w + nx] && (nx !== px || ny !== py)) {
+                            px = curX; py = curY; curX = nx; curY = ny;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) break;
+                }
+                const vx = cx - curX, vy = cy - curY;
+                const norm = Math.hypot(vx, vy);
+                if (norm >= 1e-3) {
+                    validEp[i] = 1;
+                    tangents.push([vx / norm, vy / norm]);
+                } else {
+                    tangents.push([0, 0]);
+                }
+            }
+
+            let skMat = cv.matFromArray(h, w, cv.CV_8UC1, boolArr.map(v => v ? 255 : 0));
+            let cLbl = new cv.Mat();
+            cv.connectedComponents(skMat, cLbl, 8, cv.CV_32S);
+            const lblData = cLbl.data32S;
+            const used = new Uint8Array(nEp);
+            let bridged = false;
+
+            for (let i = 0; i < nEp; i++) {
+                if (!validEp[i] || used[i]) continue;
+                let bestJ = -1, bestD = maxDist;
+                const [xi, yi] = eps[i];
+                const lblI = lblData[yi * w + xi];
+                for (let j = i + 1; j < nEp; j++) {
+                    if (!validEp[j] || used[j]) continue;
+                    const [xj, yj] = eps[j];
+                    const lblJ = lblData[yj * w + xj];
+                    const dx = xj - xi, dy = yj - yi;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < 2.0 || dist > bestD) continue;
+                    const ux = dx / dist, uy = dy / dist;
+                    const cosI = tangents[i][0] * ux + tangents[i][1] * uy;
+                    const cosJ = -(tangents[j][0] * ux + tangents[j][1] * uy);
+                    const isCollinear = cosI >= minCos && cosJ >= minCos;
+                    const isShortCorner = dist <= maxCornerDist && cosI > 0.15 && cosJ > 0.15 && (lblI !== lblJ);
+                    if (isCollinear || isShortCorner) {
+                        bestD = dist;
+                        bestJ = j;
+                    }
+                }
+                if (bestJ >= 0) {
+                    used[i] = 1;
+                    used[bestJ] = 1;
+                    cv.line(skMat, new cv.Point(xi, yi), new cv.Point(eps[bestJ][0], eps[bestJ][1]), new cv.Scalar(255), 1);
+                    bridged = true;
+                }
+            }
+            if (bridged) {
+                const sData = skMat.data;
+                for (let k = 0; k < sData.length; k++) boolArr[k] = sData[k] > 0 ? 1 : 0;
+                TraceSkeleton.thinningZS(boolArr, w, h);
+            }
+            skMat.delete(); cLbl.delete();
+        }
+
+        // Walk a 1-px closed skeleton loop neighbor-by-neighbor starting at the farthest corner from centroid
+        function orderClosedCycle(loopArr, cw, ch, x0 = 0, y0 = 0) {
+            const lxs = [], lys = [];
+            const idxMap = new Int32Array(cw * ch).fill(-1);
+            for (let ly = 0; ly < ch; ly++) {
+                for (let lx = 0; lx < cw; lx++) {
+                    if (loopArr[ly * cw + lx]) {
+                        idxMap[ly * cw + lx] = lxs.length;
+                        lxs.push(lx);
+                        lys.push(ly);
+                    }
+                }
+            }
+            const n = lxs.length;
+            if (n < 4) return lxs.map((lx, i) => [x0 + lx, y0 + lys[i]]);
+            let cx = 0, cy = 0;
+            for (let i = 0; i < n; i++) { cx += lxs[i]; cy += lys[i]; }
+            cx /= n; cy /= n;
+
+            let startIdx = 0, maxD2 = -1;
+            for (let i = 0; i < n; i++) {
+                const d2 = (lxs[i] - cx) * (lxs[i] - cx) + (lys[i] - cy) * (lys[i] - cy);
+                if (d2 > maxD2) { maxD2 = d2; startIdx = i; }
+            }
+
+            const visited = new Uint8Array(n);
+            const order = [startIdx];
+            visited[startIdx] = 1;
+            let cur = startIdx;
+            const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0], [-1, -1], [1, -1], [1, 1], [-1, 1]];
+            while (true) {
+                const lx = lxs[cur], ly = lys[cur];
+                let nxt = -1;
+                for (let d of dirs) {
+                    const nx = lx + d[0], ny = ly + d[1];
+                    if (nx >= 0 && nx < cw && ny >= 0 && ny < ch) {
+                        const nb = idxMap[ny * cw + nx];
+                        if (nb >= 0 && !visited[nb]) {
+                            nxt = nb;
+                            break;
+                        }
+                    }
+                }
+                if (nxt === -1) break;
+                visited[nxt] = 1;
+                order.push(nxt);
+                cur = nxt;
+            }
+            if (order.length >= Math.floor(0.85 * n)) {
+                const endIdx = order[order.length - 1];
+                if (Math.hypot(lxs[endIdx] - lxs[startIdx], lys[endIdx] - lys[startIdx]) <= 5.0) {
+                    const pts = order.map(i => [x0 + lxs[i], y0 + lys[i]]);
+                    pts.push([pts[0][0], pts[0][1]]);
+                    return pts;
+                }
+            }
+            // Fallback: extract external contour of the loop mask
+            let padLoop = cv.Mat.zeros(ch + 4, cw + 4, cv.CV_8UC1);
+            for (let i = 0; i < n; i++) {
+                padLoop.data[(lys[i] + 2) * (cw + 4) + (lxs[i] + 2)] = 255;
+            }
+            let cnts = new cv.MatVector(), hier = new cv.Mat();
+            cv.findContours(padLoop, cnts, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+            let bestPts = [];
+            for (let ci = 0; ci < cnts.size(); ci++) {
+                const c = cnts.get(ci);
+                if (c.rows > bestPts.length) {
+                    bestPts = [];
+                    for (let r = 0; r < c.rows; r++) {
+                        bestPts.push([x0 + c.data32S[2 * r] - 2, y0 + c.data32S[2 * r + 1] - 2]);
+                    }
+                }
+                c.delete();
+            }
+            padLoop.delete(); cnts.delete(); hier.delete();
+            if (bestPts.length >= 4) {
+                bestPts.push([bestPts[0][0], bestPts[0][1]]);
+                return bestPts;
+            }
+            const pts = order.map(i => [x0 + lxs[i], y0 + lys[i]]);
+            return pts;
+        }
+
+        // Order a degree<=2 connected skeleton chain from one end to the other via two-pass BFS
+        function orderSimpleChain(chainMaskArr, cw, ch, x0 = 0, y0 = 0) {
+            const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1], [1, -1], [1, 1]];
+            const xs = [], ys = [];
+            const idxMap = new Int32Array(cw * ch).fill(-1);
+            for (let ly = 0; ly < ch; ly++) {
+                for (let lx = 0; lx < cw; lx++) {
+                    if (chainMaskArr[ly * cw + lx]) {
+                        idxMap[ly * cw + lx] = xs.length;
+                        xs.push(x0 + lx);
+                        ys.push(y0 + ly);
+                    }
+                }
+            }
+            const n = xs.length;
+            if (n === 0) return [];
+            if (n <= 2) return xs.map((x, i) => [x, ys[i]]);
+
+            const adj = Array.from({ length: n }, () => []);
+            for (let i = 0; i < n; i++) {
+                const lx = xs[i] - x0, ly = ys[i] - y0;
+                for (let d of dirs) {
+                    const nx = lx + d[0], ny = ly + d[1];
+                    if (nx >= 0 && nx < cw && ny >= 0 && ny < ch) {
+                        const nb = idxMap[ny * cw + nx];
+                        if (nb >= 0) adj[i].push(nb);
+                    }
+                }
+            }
+
+            let start = 0;
+            for (let i = 0; i < n; i++) {
+                if (adj[i].length <= 1) { start = i; break; }
+            }
+
+            const bfs = (sNode) => {
+                const dist = new Int32Array(n).fill(-1);
+                const par = new Int32Array(n).fill(-1);
+                const q = [sNode];
+                dist[sNode] = 0;
+                let far = sNode, head = 0;
+                while (head < q.length) {
+                    const u = q[head++];
+                    if (dist[u] > dist[far]) far = u;
+                    for (let v of adj[u]) {
+                        if (dist[v] === -1) {
+                            dist[v] = dist[u] + 1;
+                            par[v] = u;
+                            q.push(v);
+                        }
+                    }
+                }
+                return { far, par };
+            };
+
+            const { far: far1 } = bfs(start);
+            const { far: far2, par: par2 } = bfs(far1);
+            const path = [];
+            for (let cur = far2; cur !== -1; cur = par2[cur]) path.push(cur);
+            path.reverse();
+            return path.map(i => [xs[i], ys[i]]);
+        }
+
+        // Universal Skeleton Graph & Loop Tracer (matching stroke_detector/stages.py _trace_component_chains):
+        // 1. Single simple closed loops (largeHoles === 1): 2-core peeling strips corner overhangs/spurs and orders cyclically.
+        // 2. Multi-loop planar graphs (largeHoles >= 2, e.g. central box-net with square + 2 trapezoids): splits at true
+        //    junction clusters so each face edge/flap is vectorized and color-classified cleanly without radial fan artifacts.
+        // 3. Branched / crossing open structures (largeHoles === 0, e.g. arrows and '++++' stitch lines): splits at junctions,
+        //    pairs collinear segments straight across X/T-junctions, and prunes unpaired dead-end side whiskers.
+        function traceSkeletonComponents(boolArr, w, h, maxSpurLen = 24) {
+            let skelMat = cv.matFromArray(h, w, cv.CV_8UC1, boolArr.map(v => v ? 255 : 0));
+            let labels = new cv.Mat(), stats = new cv.Mat(), cent = new cv.Mat();
+            const numLabels = cv.connectedComponentsWithStats(skelMat, labels, stats, cent, 8, cv.CV_32S);
+            const lblData = labels.data32S;
+            const allChains = [];
+            const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+            for (let lbl = 1; lbl < numLabels; lbl++) {
+                const x0 = stats.intPtr(lbl, cv.CC_STAT_LEFT)[0];
+                const y0 = stats.intPtr(lbl, cv.CC_STAT_TOP)[0];
+                const cw = stats.intPtr(lbl, cv.CC_STAT_WIDTH)[0];
+                const ch = stats.intPtr(lbl, cv.CC_STAT_HEIGHT)[0];
+
+                const compArr = new Uint8Array(cw * ch);
+                let padMask = cv.Mat.zeros(ch + 4, cw + 4, cv.CV_8UC1);
+                let nPts = 0;
+
+                for (let ly = 0; ly < ch; ly++) {
+                    const gy = y0 + ly;
+                    for (let lx = 0; lx < cw; lx++) {
+                        const gx = x0 + lx;
+                        if (lblData[gy * w + gx] === lbl) {
+                            compArr[ly * cw + lx] = 1;
+                            padMask.data[(ly + 2) * (cw + 4) + (lx + 2)] = 255;
+                            nPts++;
+                        }
+                    }
+                }
+                if (nPts < 10) {
+                    padMask.delete();
+                    continue;
+                }
+
+                // Count interior holes >= 200 px^2 (aligned with Stage 4 pinhole fill < 200 px^2)
+                let invPad = new cv.Mat();
+                cv.bitwise_not(padMask, invPad);
+                let hLbl = new cv.Mat(), hStats = new cv.Mat(), hCent = new cv.Mat();
+                const nInv = cv.connectedComponentsWithStats(invPad, hLbl, hStats, hCent, 4, cv.CV_32S);
+                let largeHoles = 0;
+                const smallHoleIds = new Uint8Array(nInv);
+                let hasSmallHoles = false;
+                for (let hi = 2; hi < nInv; hi++) {
+                    if (hStats.intPtr(hi, cv.CC_STAT_AREA)[0] >= 200) {
+                        largeHoles++;
+                    } else {
+                        smallHoleIds[hi] = 1;
+                        hasSmallHoles = true;
+                    }
+                }
+
+                // Case 1: Single simple closed loop (triangle, square, circle, ellipse)
+                if (largeHoles === 1) {
+                    const loopClean = compArr.slice();
+                    if (hasSmallHoles) {
+                        const hLblD = hLbl.data32S, padD = padMask.data;
+                        for (let k = 0; k < hLblD.length; k++) {
+                            if (smallHoleIds[hLblD[k]]) padD[k] = 255;
+                        }
+                        const padBool = new Array((cw + 4) * (ch + 4));
+                        for (let k = 0; k < padD.length; k++) padBool[k] = padD[k] > 0 ? 1 : 0;
+                        TraceSkeleton.thinningZS(padBool, cw + 4, ch + 4);
+                        for (let ly = 0; ly < ch; ly++) {
+                            for (let lx = 0; lx < cw; lx++) {
+                                loopClean[ly * cw + lx] = padBool[(ly + 2) * (cw + 4) + (lx + 2)] ? 1 : 0;
+                            }
+                        }
+                    }
+                    padMask.delete(); invPad.delete(); hLbl.delete(); hStats.delete(); hCent.delete();
+
+                    peelSpursAndPimples(loopClean, cw, ch, 40);
+                    let cleanCnt = 0;
+                    for (let k = 0; k < loopClean.length; k++) if (loopClean[k]) cleanCnt++;
+                    if (cleanCnt >= 16 && cleanCnt >= Math.floor(0.50 * nPts)) {
+                        const loopPts = orderClosedCycle(loopClean, cw, ch, x0, y0);
+                        allChains.push({ points: loopPts, isClosed: true });
+                        continue;
+                    }
+                } else {
+                    padMask.delete(); invPad.delete(); hLbl.delete(); hStats.delete(); hCent.delete();
+                }
+
+                // Case 2: Multi-loop planar graph (largeHoles >= 2) or open/branched structure (largeHoles === 0)
+                // Remove only tiny 1-px pimples and burrs globally; genuine ticks and sharp teeth are preserved.
+                const workArr = compArr.slice();
+                peelSpursAndPimples(workArr, cw, ch, 1);
+                pruneJunctionHairs(workArr, cw, ch, 3);
+
+                // Compute 8-connected degree in workArr
+                const degArr = new Uint8Array(cw * ch);
+                let maxDeg = 0;
+                for (let ly = 0; ly < ch; ly++) {
+                    for (let lx = 0; lx < cw; lx++) {
+                        if (!workArr[ly * cw + lx]) continue;
+                        let dCnt = 0;
+                        for (let d of dirs) {
+                            const nx = lx + d[0], ny = ly + d[1];
+                            if (nx >= 0 && nx < cw && ny >= 0 && ny < ch && workArr[ny * cw + nx]) dCnt++;
+                        }
+                        degArr[ly * cw + lx] = dCnt;
+                        if (dCnt > maxDeg) maxDeg = dCnt;
+                    }
+                }
+
+                // Subcase 2A: Pure unbranched open curve (line, arc, Bezier, sine wave, zigzag)
+                if (maxDeg < 3) {
+                    const ptsChain = orderSimpleChain(workArr, cw, ch, x0, y0);
+                    if (ptsChain.length >= 6) {
+                        const endGap = Math.hypot(ptsChain[ptsChain.length - 1][0] - ptsChain[0][0], ptsChain[ptsChain.length - 1][1] - ptsChain[0][1]);
+                        allChains.push({ points: ptsChain, isClosed: endGap <= 8.0 && ptsChain.length > 24 });
+                    }
+                    continue;
+                }
+
+                // Subcase 2B: Has junctions -> cluster junctions (3x3 dilation), extract degree<=2 edge segments
+                const juncDil = new Uint8Array(cw * ch);
+                for (let ly = 0; ly < ch; ly++) {
+                    for (let lx = 0; lx < cw; lx++) {
+                        if (degArr[ly * cw + lx] >= 3) {
+                            for (let dy = -1; dy <= 1; dy++) {
+                                const ny = ly + dy;
+                                if (ny < 0 || ny >= ch) continue;
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    const nx = lx + dx;
+                                    if (nx >= 0 && nx < cw && workArr[ny * cw + nx]) {
+                                        juncDil[ny * cw + nx] = 255;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let jMat = cv.matFromArray(ch, cw, cv.CV_8UC1, juncDil);
+                let jLbl = new cv.Mat(), jStats = new cv.Mat(), jCent = new cv.Mat();
+                const nJ = cv.connectedComponentsWithStats(jMat, jLbl, jStats, jCent, 8, cv.CV_32S);
+                const jLblData = jLbl.data32S;
+                const jCenters = [[0, 0]];
+                for (let j = 1; j < nJ; j++) {
+                    jCenters.push([x0 + jCent.doubleAt(j, 0), y0 + jCent.doubleAt(j, 1)]);
+                }
+
+                const edgesArr = new Uint8Array(cw * ch);
+                for (let i = 0; i < cw * ch; i++) {
+                    if (workArr[i] && !juncDil[i]) edgesArr[i] = 255;
+                }
+                let eMat = cv.matFromArray(ch, cw, cv.CV_8UC1, edgesArr);
+                let eLbl = new cv.Mat(), eStats = new cv.Mat(), eCent = new cv.Mat();
+                const nE = cv.connectedComponentsWithStats(eMat, eLbl, eStats, eCent, 8, cv.CV_32S);
+                const eLblData = eLbl.data32S;
+
+                const findTouchingJunction = (ptXY) => {
+                    const lx = Math.round(ptXY[0] - x0), ly = Math.round(ptXY[1] - y0);
+                    for (let r = 1; r <= 6; r++) {
+                        for (let dy = -r; dy <= r; dy++) {
+                            const ny = ly + dy;
+                            if (ny < 0 || ny >= ch) continue;
+                            for (let dx = -r; dx <= r; dx++) {
+                                const nx = lx + dx;
+                                if (nx >= 0 && nx < cw && jLblData[ny * cw + nx] > 0) {
+                                    return jLblData[ny * cw + nx];
+                                }
+                            }
+                        }
+                    }
+                    return -1;
+                };
+
+                let rawSegs = [];
+                for (let eIdx = 1; eIdx < nE; eIdx++) {
+                    const em = new Uint8Array(cw * ch);
+                    for (let i = 0; i < cw * ch; i++) {
+                        if (eLblData[i] === eIdx) em[i] = 1;
+                    }
+                    const ptsE = orderSimpleChain(em, cw, ch, x0, y0);
+                    if (ptsE.length === 0) continue;
+                    const jStart = findTouchingJunction(ptsE[0]);
+                    const jEnd = ptsE.length > 1 ? findTouchingJunction(ptsE[ptsE.length - 1]) : jStart;
+                    const ptsList = ptsE.slice();
+                    if (jStart > 0) ptsList.unshift([jCenters[jStart][0], jCenters[jStart][1]]);
+                    if (jEnd > 0 && (ptsE.length > 1 || jEnd !== jStart)) {
+                        ptsList.push([jCenters[jEnd][0], jCenters[jEnd][1]]);
+                    }
+                    if (jStart > 0 && jStart === jEnd && ptsList.length < 35) continue;
+                    rawSegs.push({
+                        pts: ptsList,
+                        jStart,
+                        jEnd,
+                        pixelCount: ptsE.length,
+                        active: true
+                    });
+                }
+
+                jMat.delete(); jLbl.delete(); jStats.delete(); jCent.delete();
+                eMat.delete(); eLbl.delete(); eStats.delete(); eCent.delete();
+
+                // Junction pairing across X/T-junctions and collinear continuation
+                if (nJ > 1) {
+                    const outwardTangent = (ptsArr, fromStart) => {
+                        const kStep = Math.min(ptsArr.length - 1, 10);
+                        if (kStep <= 0) return [1, 0];
+                        const vx = fromStart ? (ptsArr[kStep][0] - ptsArr[0][0]) : (ptsArr[ptsArr.length - 1 - kStep][0] - ptsArr[ptsArr.length - 1][0]);
+                        const vy = fromStart ? (ptsArr[kStep][1] - ptsArr[0][1]) : (ptsArr[ptsArr.length - 1 - kStep][1] - ptsArr[ptsArr.length - 1][1]);
+                        const norm = Math.hypot(vx, vy);
+                        return norm > 1e-6 ? [vx / norm, vy / norm] : [1, 0];
+                    };
+
+                    // Deactivate dead-end spurs connected to a junction so stroke continuation is preserved
+                    for (let seg of rawSegs) {
+                        if (((seg.jStart > 0 && seg.jEnd === -1) || (seg.jEnd > 0 && seg.jStart === -1)) && seg.pixelCount <= Math.max(8, maxSpurLen)) {
+                            seg.active = false;
+                        }
+                    }
+
+                    for (let jId = 1; jId < nJ; jId++) {
+                        while (true) {
+                            const incident = [];
+                            for (let sIdx = 0; sIdx < rawSegs.length; sIdx++) {
+                                const seg = rawSegs[sIdx];
+                                if (!seg.active) continue;
+                                if (seg.jStart === jId && seg.jEnd !== jId) incident.push([sIdx, true]);
+                                else if (seg.jEnd === jId && seg.jStart !== jId) incident.push([sIdx, false]);
+                            }
+                            if (incident.length < 2) break;
+
+                            let bestPair = null;
+                            if (incident.length === 2) {
+                                const [s1, start1] = incident[0];
+                                const [s2, start2] = incident[1];
+                                const u1 = outwardTangent(rawSegs[s1].pts, start1);
+                                const u2 = outwardTangent(rawSegs[s2].pts, start2);
+                                const dot = u1[0] * u2[0] + u1[1] * u2[1];
+                                // Any 2 segments at a degree-2 junction: collinear continuation (dot < -0.65) is always paired.
+                                // Sharp turn (dot < 0.94) is paired when largeHoles === 0 or when not creating a closed loop tangle.
+                                if (dot < -0.65 || (largeHoles === 0 && dot < 0.94)) {
+                                    bestPair = [s1, start1, s2, start2];
+                                }
+                            } else if (incident.length >= 3) {
+                                let bestDot = -0.65;
+                                for (let a = 0; a < incident.length; a++) {
+                                    const [s1, start1] = incident[a];
+                                    const u1 = outwardTangent(rawSegs[s1].pts, start1);
+                                    for (let b = a + 1; b < incident.length; b++) {
+                                        const [s2, start2] = incident[b];
+                                        const u2 = outwardTangent(rawSegs[s2].pts, start2);
+                                        const dot = u1[0] * u2[0] + u1[1] * u2[1];
+                                        if (dot < bestDot) {
+                                            bestDot = dot;
+                                            bestPair = [s1, start1, s2, start2];
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!bestPair) break;
+                            const [s1, start1, s2, start2] = bestPair;
+                            let pts1 = rawSegs[s1].pts.slice();
+                            let pts2 = rawSegs[s2].pts.slice();
+                            let newJStart, newJEnd;
+                            if (start1) {
+                                pts1.reverse();
+                                newJStart = rawSegs[s1].jEnd;
+                            } else {
+                                newJStart = rawSegs[s1].jStart;
+                            }
+                            if (!start2) {
+                                pts2.reverse();
+                                newJEnd = rawSegs[s2].jStart;
+                            } else {
+                                newJEnd = rawSegs[s2].jEnd;
+                            }
+                            rawSegs[s1].pts = pts1.slice(0, -1).concat(pts2);
+                            rawSegs[s1].jStart = newJStart;
+                            rawSegs[s1].jEnd = newJEnd;
+                            rawSegs[s1].pixelCount += rawSegs[s2].pixelCount;
+                            rawSegs[s2].active = false;
+                        }
+                    }
+                }
+
+                // For multi-loop planar graphs (largeHoles >= 2), split open boundary edges at sharp corners
+                if (largeHoles >= 2) {
+                    const splitSegs = [];
+                    for (let seg of rawSegs) {
+                        if (!seg.active) continue;
+                        const ptsArr = seg.pts;
+                        if (ptsArr.length >= 16) {
+                            const poly = rdpSimplify(ptsArr, 2.8, false);
+                            const splitIndices = [];
+                            const mPoly = poly.length;
+                            for (let pi = 1; pi < mPoly - 1; pi++) {
+                                const v1x = poly[pi - 1][0] - poly[pi][0], v1y = poly[pi - 1][1] - poly[pi][1];
+                                const v2x = poly[pi + 1][0] - poly[pi][0], v2y = poly[pi + 1][1] - poly[pi][1];
+                                const n1 = Math.hypot(v1x, v1y), n2 = Math.hypot(v2x, v2y);
+                                if (n1 < 8.0 || n2 < 8.0) continue;
+                                const cosA = Math.max(-1.0, Math.min(1.0, (v1x * v2x + v1y * v2y) / (n1 * n2)));
+                                const ang = Math.acos(cosA) * 180.0 / Math.PI;
+                                if (ang <= 128.0) {
+                                    let bestD = Infinity, bestIdx = 0;
+                                    for (let k = 0; k < ptsArr.length; k++) {
+                                        const d = Math.hypot(ptsArr[k][0] - poly[pi][0], ptsArr[k][1] - poly[pi][1]);
+                                        if (d < bestD) { bestD = d; bestIdx = k; }
+                                    }
+                                    if (bestIdx >= 12 && bestIdx <= ptsArr.length - 12) {
+                                        splitIndices.push(bestIdx);
+                                    }
+                                }
+                            }
+                            if (splitIndices.length > 0) {
+                                splitIndices.sort((a, b) => a - b);
+                                const dedupSplit = [splitIndices[0]];
+                                for (let k = 1; k < splitIndices.length; k++) {
+                                    if (splitIndices[k] - dedupSplit[dedupSplit.length - 1] >= 8) {
+                                        dedupSplit.push(splitIndices[k]);
+                                    }
+                                }
+                                let prevIdx = 0;
+                                for (let spIdx of dedupSplit) {
+                                    if (spIdx - prevIdx >= 6) {
+                                        splitSegs.push({
+                                            pts: ptsArr.slice(prevIdx, spIdx + 1),
+                                            jStart: prevIdx === 0 ? seg.jStart : -1,
+                                            jEnd: -1,
+                                            pixelCount: spIdx - prevIdx,
+                                            active: true
+                                        });
+                                        prevIdx = spIdx;
+                                    }
+                                }
+                                if (ptsArr.length - prevIdx >= 6) {
+                                    splitSegs.push({
+                                        pts: ptsArr.slice(prevIdx),
+                                        jStart: -1,
+                                        jEnd: seg.jEnd,
+                                        pixelCount: ptsArr.length - prevIdx,
+                                        active: true
+                                    });
+                                }
+                                continue;
+                            }
+                        }
+                        splitSegs.push(seg);
+                    }
+                    rawSegs = splitSegs;
+                }
+
+                for (let seg of rawSegs) {
+                    if (!seg.active) continue;
+                    if ((seg.jStart > 0 && seg.jEnd === -1) || (seg.jEnd > 0 && seg.jStart === -1)) {
+                        if (seg.pixelCount <= Math.max(4, maxSpurLen)) continue;
+                    }
+                    if (seg.pts.length >= 3) {
+                        allChains.push({ points: seg.pts, isClosed: false });
+                    }
+                }
+            }
+
+            skelMat.delete(); labels.delete(); stats.delete(); cent.delete();
+            return allChains;
+        }
+
+        // Robust multi-space color classification combining RGB channel absorption with CIE LAB
+        function classifyCurveLayer(workPts, lWorkMat, aWorkMat, bWorkMat, rgbWorkMat, bgAMat, bgBMat, medA, medB, activePens, isClosed = false) {
+            const cols = aWorkMat.cols, rows = aWorkMat.rows;
+            const lData = lWorkMat.data, aData = aWorkMat.data, bData = bWorkMat.data;
+            const rgbData = rgbWorkMat ? rgbWorkMat.data : null;
+            const bgAData = bgAMat ? bgAMat.data : null;
+            const bgBData = bgBMat ? bgBMat.data : null;
+            let votes = { red: 0, green: 0, blue: 0, black: 0 };
+
+            // Exclude junction end-points on open segments so shared multi-color junctions do not contaminate votes
+            let corePts = workPts;
+            if (!isClosed && workPts.length >= 10) {
+                const endGap = Math.hypot(workPts[workPts.length - 1][0] - workPts[0][0], workPts[workPts.length - 1][1] - workPts[0][1]);
+                if (endGap > 8.0) {
+                    const trim = Math.max(4, Math.min(12, Math.floor(workPts.length / 6)));
+                    if (workPts.length > 2 * trim + 2) {
+                        corePts = workPts.slice(trim, workPts.length - trim);
+                    }
+                }
+            }
+
+            const step = Math.max(1, Math.floor(corePts.length / 45));
+            let nSamples = 0;
+            for (let i = 0; i < corePts.length; i += step) {
+                const p = corePts[i];
+                const cx = Math.min(cols - 1, Math.max(0, Math.round(p[0])));
+                const cy = Math.min(rows - 1, Math.max(0, Math.round(p[1])));
+                let minL = 999, bestIdx = cy * cols + cx;
+                for (let dy = -2; dy <= 2; dy++) {
+                    const ny = Math.min(rows - 1, Math.max(0, cy + dy));
+                    for (let dx = -2; dx <= 2; dx++) {
+                        const nx = Math.min(cols - 1, Math.max(0, cx + dx));
+                        const idx = ny * cols + nx;
+                        const lv = lData[idx];
+                        if (lv < minL) {
+                            minL = lv;
+                            bestIdx = idx;
+                        }
+                    }
+                }
+                nSamples++;
+
+                const localA = bgAData ? bgAData[bestIdx] : medA;
+                const localB = bgBData ? bgBData[bestIdx] : medB;
+                const da = 0.5 * (aData[bestIdx] - localA) + 0.5 * (aData[bestIdx] - medA);
+                const db = 0.5 * (bData[bestIdx] - localB) + 0.5 * (bData[bestIdx] - medB);
+
+                // Optical RGB absorption
+                let r = 128, g = 128, b = 128;
+                if (rgbData) {
+                    const pOff = bestIdx * 3;
+                    r = rgbData[pOff]; g = rgbData[pOff + 1]; b = rgbData[pOff + 2];
+                }
+
+                const cMag = Math.hypot(da, db);
+                let deg = Math.atan2(db, da) * 180.0 / Math.PI;
+                if (deg < 0) deg += 360.0;
+
+                const isRgbRed = (r > g + 24) && (r > b + 24) && (da >= 2.0);
+                const isRgbGreen = (g >= r + 4) && (g > b + 8) && (da <= -1.5);
+                const isRgbBlue = (b >= r) && (b >= g) && (db <= -3.5);
+
+                if (isRgbRed || ((deg <= 52.0 || deg >= 310.0) && da >= 2.8 && cMag >= 3.6)) {
+                    votes.red++;
+                } else if (isRgbBlue || ((deg >= 220.0 && deg <= 315.0) && db <= -3.5 && cMag >= 3.5) || (db <= -4.0 && db < da)) {
+                    votes.blue++;
+                } else if (isRgbGreen || ((deg >= 125.0 && deg <= 225.0) && da <= -2.0 && cMag >= 3.5)) {
+                    votes.green++;
+                } else {
+                    votes.black++;
+                }
+            }
+
+            const total = Math.max(1, nSamples);
+            const totalInk = votes.red + votes.green + votes.blue;
+            if (totalInk < Math.max(2, Math.floor(nSamples * 0.22))) {
+                return null;
+            }
+
+            let dominant = null;
+            const penCandidates = [
+                { name: 'blue', count: votes.blue, layer: 'thru_cut' },
+                { name: 'red', count: votes.red, layer: 'score' },
+                { name: 'green', count: votes.green, layer: 'crease' },
+            ];
+            const activeCandidates = penCandidates.filter(p => activePens[p.name]);
+            activeCandidates.sort((a, b) => b.count - a.count);
+
+            if (activeCandidates.length > 0 && activeCandidates[0].count > 0) {
+                dominant = activeCandidates[0].layer;
+            } else if (activePens.black && votes.black > 0) {
+                dominant = 'thru_cut';
+            } else {
+                dominant = null;
+            }
+
+            return dominant;
+        }
+
+        document.getElementById('btnRun').addEventListener('click', async () => {
+            if (!loadedImg) return;
+            document.getElementById('btnRun').disabled = true;
+            addLog('--- Starting 9-Stage Thin Stroke Pipeline with ROI Zoom ---', 'info');
+
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = loadedImg.width;
+                canvas.height = loadedImg.height;
+                canvas.getContext('2d').drawImage(loadedImg, 0, 0);
+                let src = cv.imread(canvas);
+
+                let workImg = src.clone();
+                let frameConfig = { cropPhysW: 775.0, cropPhysH: 1065.0 };
+                let arucoWarped = false;
+
+                // Stage 0A: Optional ArUco Warp
+                if (document.getElementById('useAruco').checked) {
+                    const warpEngine = new WarpEngine(2000);
+                    try {
+                        const warpRes = warpEngine.normalizePerspective(src, null);
+                        if (warpRes && warpRes.image) {
+                            workImg.delete();
+                            workImg = warpRes.image;
+                            frameConfig = warpEngine.currentFrameConfig;
+                            arucoWarped = true;
+                            showCanvas('0', workImg, `ArUco Warped Bed: ${workImg.cols}×${workImg.rows} px (${frameConfig.cropPhysW}×${frameConfig.cropPhysH} mm)`);
+                            addLog('ArUco 4-corner perspective flatten succeeded.', 'ok');
+                        } else {
+                            showCanvas('0', workImg, `No 4 ArUco markers found — unwarped image (${workImg.cols}×${workImg.rows})`);
+                            addLog('Less than 4 ArUco markers found; proceeding with unwarped image.', 'warn');
+                        }
+                    } catch (e) {
+                        showCanvas('0', workImg, `Unwarped image (${workImg.cols}×${workImg.rows})`);
+                    }
+                } else {
+                    showCanvas('0', workImg, `ArUco disabled — raw image (${workImg.cols}×${workImg.rows})`);
+                }
+
+                const fullBedW = workImg.cols, fullBedH = workImg.rows;
+
+                // Stage 0B: Auto-ROI Detection + Optional Interactive Lasso
+                // Only run full-bed auto-ROI detection when ArUco markers were warped (or on a large >1400px bed image)
+                const roiMethod = document.getElementById('roiDetectorSelect').value;
+                const useLassoChecked = document.getElementById('useLasso').checked;
+                let detectedBox = null;
+
+                if (arucoWarped && roiMethod === 'contour') {
+                    addLog('Running OpenCV Contour Workpiece Auto-Detection...', 'info');
+                    try {
+                        detectedBox = ContourRoiDetector.detect(workImg, { padding: 35, frameMargin: 90 });
+                        if (detectedBox) {
+                            addLog(`OpenCV Detected ROI: [x:${detectedBox.x}, y:${detectedBox.y}, w:${detectedBox.width}, h:${detectedBox.height}]`, 'ok');
+                        }
+                    } catch (detErr) {
+                        addLog('OpenCV Contour Detection Warning: ' + detErr.message, 'warn');
+                    }
+                } else if (arucoWarped && roiMethod === 'yolo') {
+                    addLog('Running YOLO Workpiece Auto-Detection...', 'info');
+                    try {
+                        const detector = new CardboardDetector();
+                        detectedBox = await detector.detect(workImg, 0.25);
+                    } catch (detErr) {
+                        addLog('YOLO Detection Warning: ' + detErr.message, 'warn');
+                    }
+                }
+
+                // Shave physical cardboard edges inward so outer cardboard boundary does not trigger ridge filter
+                if (detectedBox) {
+                    const shavePx = Math.max(0, parseInt(document.getElementById('roiInset')?.value || '26', 10));
+                    if (shavePx > 0) {
+                        const insetX = Math.min(shavePx, Math.floor(detectedBox.width * 0.4));
+                        const insetY = Math.min(shavePx, Math.floor(detectedBox.height * 0.4));
+                        detectedBox.x += insetX;
+                        detectedBox.y += insetY;
+                        detectedBox.width = Math.max(20, detectedBox.width - 2 * insetX);
+                        detectedBox.height = Math.max(20, detectedBox.height - 2 * insetY);
+                        addLog(`Shaved ${shavePx}px cardboard edge: [x:${detectedBox.x}, y:${detectedBox.y}, w:${detectedBox.width}, h:${detectedBox.height}]`, 'info');
+                    }
+                }
+
+                let userMaskMat = null;
+                if (useLassoChecked && arucoWarped) {
+                    addLog('Opening Lasso Tool for ROI confirmation...', 'warn');
+                    userMaskMat = await openLassoToolAsync(workImg, detectedBox);
+                } else if (detectedBox) {
+                    userMaskMat = cv.Mat.zeros(fullBedH, fullBedW, cv.CV_8UC1);
+                    const rectPts = [
+                        detectedBox.x, detectedBox.y,
+                        detectedBox.x + detectedBox.width, detectedBox.y,
+                        detectedBox.x + detectedBox.width, detectedBox.y + detectedBox.height,
+                        detectedBox.x, detectedBox.y + detectedBox.height
+                    ];
+                    const ptMat = cv.matFromArray(4, 1, cv.CV_32SC2, rectPts);
+                    const pv = new cv.MatVector();
+                    pv.push_back(ptMat);
+                    cv.fillPoly(userMaskMat, pv, new cv.Scalar(255, 255, 255, 255));
+                    ptMat.delete(); pv.delete();
+                }
+
+                // Determine ROI crop box (roiX, roiY, roiW, roiH) on fullBed
+                let roiX = 0, roiY = 0, roiW = fullBedW, roiH = fullBedH;
+                let roiCropMat = null;
+                let roiMaskCrop = null;
+
+                if (userMaskMat) {
+                    const bbox = getMaskBoundingBox(userMaskMat);
+                    if (bbox && bbox.width >= 20 && bbox.height >= 20) {
+                        roiX = bbox.x;
+                        roiY = bbox.y;
+                        roiW = bbox.width;
+                        roiH = bbox.height;
+                        const rect = new cv.Rect(roiX, roiY, roiW, roiH);
+                        roiCropMat = workImg.roi(rect).clone();
+                        roiMaskCrop = userMaskMat.roi(rect).clone();
+                        showCanvas('0', roiCropMat, `Zoomed ROI Crop: [x:${roiX}, y:${roiY}, w:${roiW}, h:${roiH}] from ${fullBedW}×${fullBedH} bed`, true);
+                        addLog(`Zooming into ROI crop: ${roiW}×${roiH} at offset (${roiX}, ${roiY})`, 'ok');
+                    }
+                    userMaskMat.delete();
+                }
+
+                if (!roiCropMat) {
+                    roiCropMat = workImg.clone();
+                    roiMaskCrop = new cv.Mat(roiH, roiW, cv.CV_8UC1, new cv.Scalar(255));
+                }
+
+                // STAGE 1: Capture & Quality Gate on the ROI
+                let grayRoi = new cv.Mat();
+                cv.cvtColor(roiCropMat, grayRoi, cv.COLOR_RGBA2GRAY);
+                let lap = new cv.Mat(), meanMat = new cv.Mat(), stdMat = new cv.Mat();
+                cv.Laplacian(grayRoi, lap, cv.CV_64F);
+                cv.meanStdDev(lap, meanMat, stdMat);
+                const blurScore = stdMat.doubleAt(0, 0) * stdMat.doubleAt(0, 0);
+                const brightness = cv.mean(grayRoi)[0];
+                lap.delete(); meanMat.delete(); stdMat.delete();
+
+                let rgbRoi = new cv.Mat(), labRoi = new cv.Mat();
+                cv.cvtColor(roiCropMat, rgbRoi, cv.COLOR_RGBA2RGB);
+                cv.cvtColor(rgbRoi, labRoi, cv.COLOR_RGB2Lab);
+                let labPlanes = new cv.MatVector();
+                cv.split(labRoi, labPlanes);
+                let lRoi = labPlanes.get(0);
+                let aRoi = labPlanes.get(1);
+                let bRoi = labPlanes.get(2);
+
+                let ignoreMask = cv.Mat.zeros(roiCropMat.rows, roiCropMat.cols, cv.CV_8UC1);
+                // Only mask near-white UI overlays (L > 235 and min(R,G,B) > 215), matching stroke_detector/stages.py
+                const rgbData = rgbRoi.data, lData = lRoi.data, igData = ignoreMask.data;
+                let hasOverlay = false;
+                for (let i = 0; i < lData.length; i++) {
+                    const r = rgbData[i * 3], g = rgbData[i * 3 + 1], b = rgbData[i * 3 + 2];
+                    if (lData[i] > 235 && Math.min(r, g, b) > 215) {
+                        igData[i] = 255;
+                        hasOverlay = true;
+                    }
+                }
+                if (hasOverlay) {
+                    let dilateK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(21, 21));
+                    cv.dilate(ignoreMask, ignoreMask, dilateK);
+                    dilateK.delete();
+                }
+
+                // Also mark outside-lasso pixels in ignoreMask
+                for (let i = 0; i < ignoreMask.data.length; i++) {
+                    if (roiMaskCrop.data[i] === 0) ignoreMask.data[i] = 255;
+                }
+                showCanvas('1', ignoreMask, `ROI Blur: ${blurScore.toFixed(1)} | Brightness: ${brightness.toFixed(1)} | Ignore Mask`);
+                addLog(`Stage 1 done. ROI Blur=${blurScore.toFixed(1)}, Brightness=${brightness.toFixed(1)}`, 'ok');
+
+                // STAGE 2: Supersample / Zoom ROI to ~1000px long side + Flat-field L* and Chromaticity
+                const roiLongSide = Math.max(roiW, roiH);
+                let zoomScale = 1.0;
+                if (roiLongSide < 500) {
+                    zoomScale = 2.0;
+                } else if (roiLongSide > 1000) {
+                    zoomScale = 1000.0 / roiLongSide;
+                }
+                const workW = Math.max(64, Math.round(roiW * zoomScale));
+                const workH = Math.max(64, Math.round(roiH * zoomScale));
+                // Scale factors to map from zoomed working resolution back to ROI and full bed
+                const scaleX = roiW / workW;
+                const scaleY = roiH / workH;
+
+                const interp = zoomScale > 1.0 ? cv.INTER_CUBIC : cv.INTER_AREA;
+                let lWork = new cv.Mat(), aWork = new cv.Mat(), bWork = new cv.Mat();
+                let ignoreWork = new cv.Mat(), rgbWork = new cv.Mat();
+                cv.resize(lRoi, lWork, new cv.Size(workW, workH), 0, 0, interp);
+                cv.resize(aRoi, aWork, new cv.Size(workW, workH), 0, 0, interp);
+                cv.resize(bRoi, bWork, new cv.Size(workW, workH), 0, 0, interp);
+                cv.resize(ignoreMask, ignoreWork, new cv.Size(workW, workH), 0, 0, cv.INTER_NEAREST);
+                cv.resize(rgbRoi, rgbWork, new cv.Size(workW, workH), 0, 0, interp);
+
+                // Add border ignore zone around the zoomed ROI perimeter to suppress crop boundary artifacts
+                const borderIgnorePx = Math.max(26, Math.round(14 * zoomScale));
+                for (let y = 0; y < workH; y++) {
+                    for (let x = 0; x < workW; x++) {
+                        if (x < borderIgnorePx || x >= workW - borderIgnorePx || y < borderIgnorePx || y >= workH - borderIgnorePx) {
+                            ignoreWork.data[y * workW + x] = 255;
+                        }
+                    }
+                }
+
+                // Fill ignoreWork pixels with median L*, a*, b* of valid cardboard pixels
+                // Calculate median L*, a*, b* of cardboard pixels
+                const validL = [], validA = [], validB = [];
+                for (let i = 0; i < lWork.data.length; i += 4) {
+                    if (ignoreWork.data[i] === 0) {
+                        validL.push(lWork.data[i]);
+                        validA.push(aWork.data[i]);
+                        validB.push(bWork.data[i]);
+                    }
+                }
+                validL.sort((x, y) => x - y);
+                validA.sort((x, y) => x - y);
+                validB.sort((x, y) => x - y);
+                const medL = validL.length ? validL[Math.floor(validL.length / 2)] : 150;
+                const medA = validA.length ? validA[Math.floor(validA.length / 2)] : 128;
+                const medB = validB.length ? validB[Math.floor(validB.length / 2)] : 128;
+
+                // Fill only true UI overlays / outside-lasso pixels (from Stage 1) with median L*, a*, b*
+                for (let i = 0; i < lWork.data.length; i++) {
+                    if (ignoreWork.data[i] > 0) {
+                        lWork.data[i] = medL;
+                        aWork.data[i] = medA;
+                        bWork.data[i] = medB;
+                    }
+                }
+
+                // Local CIE-LAB median background baseline, matching the Python
+                // residual model.  A wide median removes marker ink while not
+                // treating corrugation shadows as coloured signal.
+                let bgLMat = new cv.Mat(), bgAMat = new cv.Mat(), bgBMat = new cv.Mat();
+                cv.medianBlur(lWork, bgLMat, 61);
+                cv.medianBlur(aWork, bgAMat, 61);
+                cv.medianBlur(bWork, bgBMat, 61);
+                const bgLD = bgLMat.data, bgAD = bgAMat.data, bgBD = bgBMat.data;
+                const inkStrength = new Float32Array(workW * workH);
+                const inkSamples = [];
+                for (let i = 0; i < inkStrength.length; i++) {
+                    if (ignoreWork.data[i] > 0) continue;
+                    const dL = lWork.data[i] - bgLD[i];
+                    const da = aWork.data[i] - bgAD[i];
+                    const db = bWork.data[i] - bgBD[i];
+                    const strength = Math.hypot(da, db) + 0.30 * Math.max(-dL, 0);
+                    inkStrength[i] = strength;
+                    if ((i & 3) === 0) inkSamples.push(strength);
+                }
+                const inkNoise = medianAndMad(inkSamples);
+                const inkGate = new Uint8Array(workW * workH);
+                const inkFloor = inkNoise.median + 3.2 * Math.max(inkNoise.sigma, 0.05);
+                for (let i = 0; i < inkGate.length; i++) {
+                    if (ignoreWork.data[i] === 0 && inkStrength[i] > inkFloor) inkGate[i] = 1;
+                }
+
+                // Stage 2 Flat-fielding + Chroma-Assisted Ink Contrast (matching stroke_detector/stages.py stage2_preprocess)
+                let lFloat = new cv.Mat(), bgBlur = new cv.Mat(), flatRaw = new cv.Mat(), flatBi = new cv.Mat();
+                lWork.convertTo(lFloat, cv.CV_32F);
+                cv.GaussianBlur(lFloat, bgBlur, new cv.Size(0, 0), 25, 25);
+                // flatRaw = lFloat - bgBlur (dark strokes are negative)
+                cv.subtract(lFloat, bgBlur, flatRaw);
+                const fData = flatRaw.data32F;
+                const aDataW = aWork.data, bDataW = bWork.data, igDataW = ignoreWork.data;
+                for (let i = 0; i < fData.length; i++) {
+                    if (igDataW[i] > 0) continue;
+                    const ld = fData[i];
+                    if (ld < 0) {
+                        let da = aDataW[i] - medA;
+                        const db = bDataW[i] - medB;
+                        if (da < 0) da *= 1.85;
+                        const chromaDev = Math.hypot(da, db);
+                        if (chromaDev > 5.2) {
+                            const darkW = Math.min(1.0, -ld / 3.5);
+                            const boost = Math.min(12.0, darkW * (chromaDev - 5.2) * 0.95);
+                            fData[i] = ld - boost;
+                        }
+                    }
+                }
+                cv.bilateralFilter(flatRaw, flatBi, 7, 12, 5);
+
+                let flatVis = new cv.Mat();
+                cv.normalize(flatBi, flatVis, 0, 255, cv.NORM_MINMAX, cv.CV_8U);
+                showCanvas('2', flatVis, `Zoomed ROI (${workW}×${workH}px, ${zoomScale.toFixed(2)}× zoom) Chroma-Assisted Flat-Field`);
+                // Chroma-angle classification map (red / green / blue sectors)
+                let chromaVis = cv.Mat.zeros(workH, workW, cv.CV_8UC3);
+                const chVisD = chromaVis.data;
+                for (let i = 0; i < fData.length; i++) {
+                    if (igDataW[i] > 0) continue;
+                    const da_i = aDataW[i] - bgAD[i];
+                    const db_i = bDataW[i] - bgBD[i];
+                    const chr_i = Math.hypot(da_i, db_i);
+                    if (chr_i < 3.5) continue;
+                    const ang_i = (Math.atan2(db_i, da_i) * 180.0 / Math.PI + 360.0) % 360.0;
+                    const inten = Math.min(255, Math.round(chr_i * 10.0));
+                    const p3 = i * 3;
+                    if (ang_i <= 85.0 || ang_i >= 325.0) {
+                        chVisD[p3] = inten; chVisD[p3 + 1] = 45; chVisD[p3 + 2] = 45;
+                    } else if (ang_i >= 115.0 && ang_i <= 215.0) {
+                        chVisD[p3] = 45; chVisD[p3 + 1] = inten; chVisD[p3 + 2] = 70;
+                    } else if (ang_i > 215.0 && ang_i < 325.0) {
+                        chVisD[p3] = 45; chVisD[p3 + 1] = 120; chVisD[p3 + 2] = inten;
+                    }
+                }
+                showCanvas('2', chromaVis, `Chroma-Angle Classification Map (Red / Green / Blue Sectors)`, true);
+                chromaVis.delete();
+                flatVis.delete(); lFloat.delete(); bgBlur.delete(); flatRaw.delete();
+                addLog(`Stage 2 done. ROI zoomed ${zoomScale.toFixed(2)}× to ${workW}×${workH} px.`, 'ok');
+
+                // STAGE 3: Multi-scale Sato Ridge Enhancement on Zoomed ROI
+                const sigmas = document.getElementById('sigmaInput').value.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n) && n > 0);
+                const satoRes = computeSatoStrokeness(flatBi, ignoreWork.data, sigmas.length ? sigmas : [2.0, 3.0]);
+                let satoMat = cv.matFromArray(workH, workW, cv.CV_8UC1, satoRes.u8Map);
+                showCanvas('3', satoMat, `Sato Strokeness [0..1] (sigmas=[${sigmas.join(',')}], rawMax=${satoRes.rawMax.toFixed(3)})`);
+                addLog(`Stage 3 done. Max ridge response=${satoRes.rawMax.toFixed(3)}`, 'ok');
+
+                // Per-colour Sato responses use the LAB residual vector and the
+                // MAD-calibrated ink gate above.  Negating the positive colour
+                // signal presents it as a dark ridge to the shared Sato kernel.
+                const colorDefs = [
+                    { name: 'red', center: 2, half: 52, min: 3.8 },
+                    { name: 'green', center: 175, half: 50, min: 3.5 },
+                    { name: 'blue', center: 268, half: 36, min: 4.2 }
+                ];
+                const colorRidges = {};
+                const colorNoise = {};
+                for (const def of colorDefs) {
+                    const signal = new Float32Array(workW * workH);
+                    for (let i = 0; i < signal.length; i++) {
+                        if (!inkGate[i]) continue;
+                        const da = aWork.data[i] - bgAD[i];
+                        const db = bWork.data[i] - bgBD[i];
+                        const angle = (Math.atan2(db, da) * 180 / Math.PI + 360) % 360;
+                        const delta = Math.abs(((angle - def.center + 180) % 360) - 180);
+                        const angleWeight = Math.max(0, Math.min(1, (def.half - delta) / (def.half * 0.45)));
+                        const chroma = Math.hypot(da, db);
+                        const chromaWeight = Math.max(0, Math.min(1, (chroma - def.min * 0.70) / (def.min * 0.45)));
+                        signal[i] = -inkStrength[i] * angleWeight * chromaWeight;
+                    }
+                    const signalMat = cv.matFromArray(workH, workW, cv.CV_32F, signal);
+                    const ridge = computeSatoStrokeness(signalMat, ignoreWork.data, sigmas.length ? sigmas : [2.0, 3.0]);
+                    signalMat.delete();
+                    const bg = [];
+                    for (let i = 0; i < ridge.floatMap.length; i += 4) {
+                        if (ignoreWork.data[i] === 0 && !inkGate[i]) bg.push(ridge.floatMap[i]);
+                    }
+                    const stats = medianAndMad(bg);
+                    colorRidges[def.name] = ridge.floatMap;
+                    colorNoise[def.name] = { median: stats.median, sigma: Math.max(stats.sigma, 0.01) };
+                }
+
+                // STAGE 4: Hysteresis Threshold (valid non-ignored pixels only) + 3x3 Morphological Close + Pinhole Fill
+                const validStrokeness = [];
+                for (let i = 0; i < satoRes.floatMap.length; i++) {
+                    if (ignoreWork.data[i] === 0) validStrokeness.push(satoRes.floatMap[i]);
+                }
+                validStrokeness.sort((a, b) => a - b);
+                const highPct = parseFloat(document.getElementById('hystHigh').value) || 97.0;
+                const lowPct = parseFloat(document.getElementById('hystLow').value) || 90.0;
+                const p80 = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * 0.80))] : 0.05;
+                const p95 = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * 0.95))] : 0.12;
+                let pHigh = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * highPct / 100))] : 0.22;
+                let pLow = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * lowPct / 100))] : 0.10;
+                // Cap highVal relative to 80th-percentile background floor when dense strokes cover >5% of the ROI (p95 > 2.8 * p80)
+                if (p80 > 0.01 && p95 > 2.8 * p80) {
+                    pHigh = Math.min(pHigh, Math.max(0.24, 4.0 * p80));
+                    pLow = Math.max(0.06, Math.min(pHigh * 0.50, 1.8 * p80));
+                }
+                const highVal = Math.max(0.18, pHigh);
+                const lowVal = Math.max(0.06, Math.min(highVal * 0.50, pLow));
+
+                let highMask = new cv.Mat(), lowMask = new cv.Mat();
+                cv.threshold(satoMat, highMask, Math.round(highVal * 255), 255, cv.THRESH_BINARY);
+                cv.threshold(satoMat, lowMask, Math.round(lowVal * 255), 255, cv.THRESH_BINARY);
+
+                let labels = new cv.Mat(), stats = new cv.Mat(), centroids = new cv.Mat();
+                const numLabels = cv.connectedComponentsWithStats(lowMask, labels, stats, centroids, 8, cv.CV_32S);
+                const hasHigh = new Uint8Array(numLabels);
+                const lblData = labels.data32S, hiData = highMask.data;
+                for (let i = 0; i < lblData.length; i++) {
+                    if (hiData[i] > 0 && lblData[i] > 0) hasHigh[lblData[i]] = 1;
+                }
+                let hystMat = cv.Mat.zeros(workH, workW, cv.CV_8UC1);
+                const hystData = hystMat.data;
+                for (let i = 0; i < lblData.length; i++) {
+                    if (hasHigh[lblData[i]] && igDataW[i] === 0) hystData[i] = 255;
+                }
+                let closeK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+                cv.morphologyEx(hystMat, hystMat, cv.MORPH_CLOSE, closeK);
+                // Fill small pinholes (< 200 px^2) inside thick junctions without bridging adjacent parallel lines
+                fillSmallMaskHoles(hystMat, 200);
+                for (let i = 0; i < hystData.length; i++) {
+                    if (igDataW[i] > 0) hystData[i] = 0;
+                }
+                closeK.delete(); highMask.delete(); lowMask.delete(); labels.delete(); stats.delete(); centroids.delete();
+                showCanvas('4', hystMat, `Hysteresis Mask (high=${highVal.toFixed(2)}, low=${lowVal.toFixed(2)}) + 3×3 Close + Pinhole Fill`);
+                // Per-color masks debug visualization (Red, Green, Blue)
+                let colorMasksVis = cv.Mat.zeros(workH, workW, cv.CV_8UC3);
+                const cmVisD = colorMasksVis.data;
+                let rCnt = 0, gCnt = 0, bCnt = 0;
+                for (let i = 0; i < hystData.length; i++) {
+                    if (hystData[i] === 0) continue;
+                    const da_i = aDataW[i] - medA;
+                    const db_i = bDataW[i] - medB;
+                    const p3 = i * 3;
+                    let deg_i = Math.atan2(db_i, da_i) * 180.0 / Math.PI;
+                    if (deg_i < 0) deg_i += 360.0;
+                    const c_i = Math.hypot(da_i, db_i);
+
+                    if ((deg_i <= 52.0 || deg_i >= 310.0) && da_i >= 1.5 && c_i >= 3.5) {
+                        cmVisD[p3] = 229; cmVisD[p3 + 1] = 57; cmVisD[p3 + 2] = 53; rCnt++;
+                    } else if (deg_i >= 220.0 && deg_i <= 315.0 && db_i <= -3.5 && c_i >= 3.5) {
+                        cmVisD[p3] = 30; cmVisD[p3 + 1] = 136; cmVisD[p3 + 2] = 229; bCnt++;
+                    } else if (deg_i >= 125.0 && deg_i <= 225.0 && da_i <= -1.5 && c_i >= 3.5) {
+                        cmVisD[p3] = 67; cmVisD[p3 + 1] = 160; cmVisD[p3 + 2] = 71; gCnt++;
+                    } else {
+                        if (db_i <= -4.0 && db_i < da_i) {
+                            cmVisD[p3] = 30; cmVisD[p3 + 1] = 136; cmVisD[p3 + 2] = 229; bCnt++;
+                        } else if (da_i >= 2.0) {
+                            cmVisD[p3] = 229; cmVisD[p3 + 1] = 57; cmVisD[p3 + 2] = 53; rCnt++;
+                        } else if (da_i <= -2.0) {
+                            cmVisD[p3] = 67; cmVisD[p3 + 1] = 160; cmVisD[p3 + 2] = 71; gCnt++;
+                        }
+                    }
+                }
+                showCanvas('4', colorMasksVis, `Per-Color Masks Composite (Red=${rCnt}px, Green=${gCnt}px, Blue=${bCnt}px)`, true);
+                colorMasksVis.delete();
+                addLog('Stage 4 done.', 'ok');
+
+                // STAGE 5: Skeleton, Gap-Linking, Despeckling & Universal Graph Decomposition
+                const minSpanPx = Math.max(16, parseInt(document.getElementById('minSpanPx')?.value || '22', 10));
+                const maxSpurLen = Math.max(0, parseInt(document.getElementById('spurLenPx')?.value || '24', 10));
+
+                // Pre-filter noise specks (require area >= 24 or max(w,h) >= 14)
+                let ccLabels = new cv.Mat(), ccStats = new cv.Mat(), ccCent = new cv.Mat();
+                const nComp = cv.connectedComponentsWithStats(hystMat, ccLabels, ccStats, ccCent, 8, cv.CV_32S);
+                const keepPre = new Uint8Array(nComp);
+                for (let c = 1; c < nComp; c++) {
+                    const area = ccStats.intPtr(c, cv.CC_STAT_AREA)[0];
+                    const w = ccStats.intPtr(c, cv.CC_STAT_WIDTH)[0];
+                    const h = ccStats.intPtr(c, cv.CC_STAT_HEIGHT)[0];
+                    if (area < 16) continue;
+                    if (Math.min(w, h) <= 2 && Math.max(w, h) < 32) continue;
+                    if (area >= 28 || Math.max(w, h) >= 18) keepPre[c] = 1;
+                }
+                let cleanMask = cv.Mat.zeros(workH, workW, cv.CV_8UC1);
+                const ccData = ccLabels.data32S, cleanData = cleanMask.data;
+                const boolArr = new Array(workW * workH);
+                for (let i = 0; i < ccData.length; i++) {
+                    const v = keepPre[ccData[i]] ? 255 : 0;
+                    cleanData[i] = v;
+                    boolArr[i] = v ? 1 : 0;
+                }
+                ccLabels.delete(); ccStats.delete(); ccCent.delete();
+
+                // 1. Thin mask to 1px skeleton with Zhang-Suen, peel 1-px burrs, and link collinear/corner gaps
+                TraceSkeleton.thinningZS(boolArr, workW, workH);
+                peelSpursAndPimples(boolArr, workW, workH, 1);
+                linkSkeletonEndpoints(boolArr, workW, workH, 18.0, 0.70, 18.0);
+                linkSkeletonEndpoints(boolArr, workW, workH, 24.0, 0.70, 14.0);
+
+                // 2. Post-filter linked skeleton components by minimum length and diagonal span (>= minSpanPx)
+                let skPostMat = cv.matFromArray(workH, workW, cv.CV_8UC1, boolArr.map(v => v ? 255 : 0));
+                let skLbl = new cv.Mat(), skStats = new cv.Mat(), skCent = new cv.Mat();
+                const nSk = cv.connectedComponentsWithStats(skPostMat, skLbl, skStats, skCent, 8, cv.CV_32S);
+                const keepSk = new Uint8Array(nSk);
+                for (let c = 1; c < nSk; c++) {
+                    const area = skStats.intPtr(c, cv.CC_STAT_AREA)[0];
+                    const w = skStats.intPtr(c, cv.CC_STAT_WIDTH)[0];
+                    const h = skStats.intPtr(c, cv.CC_STAT_HEIGHT)[0];
+                    const span = Math.hypot(w, h);
+                    if (span >= minSpanPx || area >= minSpanPx * 1.4) keepSk[c] = 1;
+                }
+                const skLblD = skLbl.data32S;
+                for (let i = 0; i < skLblD.length; i++) {
+                    boolArr[i] = keepSk[skLblD[i]] ? 1 : 0;
+                }
+                skPostMat.delete(); skLbl.delete(); skStats.delete(); skCent.delete();
+
+                // 3. Decompose 1px skeleton using Universal Loop + Junction Graph + Collinear Crossing Tracer
+                const chains = traceSkeletonComponents(boolArr, workW, workH, maxSpurLen);
+
+                // Render true 1-px filtered skeleton mask directly for Stage 5 inspection
+                let skelVis = cv.matFromArray(workH, workW, cv.CV_8UC1, boolArr.map(v => v ? 255 : 0));
+                let graphVis = cv.Mat.zeros(workH, workW, cv.CV_8UC3);
+                const gvD = graphVis.data;
+                for (let y = 1; y < workH - 1; y++) {
+                    for (let x = 1; x < workW - 1; x++) {
+                        const idx = y * workW + x;
+                        if (!boolArr[idx]) continue;
+                        const da_i = aDataW[idx] - medA;
+                        const p3 = idx * 3;
+                        if (da_i >= 1.5) { gvD[p3] = 229; gvD[p3 + 1] = 57; gvD[p3 + 2] = 53; }
+                        else { gvD[p3] = 67; gvD[p3 + 1] = 160; gvD[p3 + 2] = 71; }
+                    }
+                }
+                for (let ch of chains) {
+                    if (ch.points.length >= 2 && !ch.isClosed) {
+                        const p0 = ch.points[0], p1 = ch.points[ch.points.length - 1];
+                        cv.circle(graphVis, new cv.Point(Math.round(p0[0]), Math.round(p0[1])), 3, new cv.Scalar(0, 255, 255), -1);
+                        cv.circle(graphVis, new cv.Point(Math.round(p1[0]), Math.round(p1[1])), 3, new cv.Scalar(0, 255, 255), -1);
+                    }
+                }
+                showCanvas('5', graphVis, `Per-Color Skeleton & Junction/Endpoint Graph (${chains.length} chains)`);
+                graphVis.delete();
+                addLog(`Stage 5 done. Linked skeleton decomposed into ${chains.length} chains.`, 'ok');
+
+                // STAGE 6: Vectorize & Scale/Offset back to Full Bed Coordinates
+                const activePens = {
+                    blue: document.getElementById('penBlue').checked,
+                    red: document.getElementById('penRed').checked,
+                    green: document.getElementById('penGreen').checked,
+                    black: document.getElementById('penBlack').checked
+                };
+
+                let vecVis = rgbWork.clone();
+                const tracedCurves = [];
+                for (let ch of chains) {
+                    const poly = ch.points;
+                    if (poly.length < 2) continue;
+                    let lenW = 0;
+                    for (let i = 1; i < poly.length; i++) {
+                        lenW += Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]);
+                    }
+                    if (lenW < Math.max(14.0, minSpanPx * 0.65)) continue;
+                    const simp = rdpSimplify(poly, ch.isClosed ? 1.8 : 0.8, ch.isClosed);
+                    if (ch.isClosed && simp.length >= 3) {
+                        const first = simp[0], last = simp[simp.length - 1];
+                        if (Math.hypot(first[0] - last[0], first[1] - last[1]) > 1.0) {
+                            simp.push([first[0], first[1]]);
+                        }
+                    }
+                    const chLayer = classifyCurveLayer(poly, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, ch.isClosed);
+                    if (!chLayer) continue;
+                    tracedCurves.push({
+                        workPts: simp,
+                        densePts: poly,
+                        isClosed: ch.isClosed,
+                        layer: chLayer,
+                        lengthPx: lenW * 0.5 * (scaleX + scaleY)
+                    });
+                }
+
+                // Strict collinear endpoint concatenation only for continuous broken strokes
+                const snapRadius6 = 6.0;
+                let mergedCurves = tracedCurves.slice();
+                let changedMerge = true;
+                while (changedMerge) {
+                    changedMerge = false;
+                    for (let i = 0; i < mergedCurves.length; i++) {
+                        const cA = mergedCurves[i];
+                        if (cA.isClosed || cA.workPts.length < 2) continue;
+                        const nA = cA.workPts.length;
+                        const epA0 = cA.workPts[0], epA1 = cA.workPts[nA - 1];
+                        const kA = Math.min(nA - 1, 6);
+                        const vA1 = [epA1[0] - cA.workPts[nA - 1 - kA][0], epA1[1] - cA.workPts[nA - 1 - kA][1]];
+                        const lA1 = Math.hypot(vA1[0], vA1[1]);
+                        const uA1 = lA1 > 1e-4 ? [vA1[0] / lA1, vA1[1] / lA1] : [1, 0];
+                        const vA0 = [epA0[0] - cA.workPts[kA][0], epA0[1] - cA.workPts[kA][1]];
+                        const lA0 = Math.hypot(vA0[0], vA0[1]);
+                        const uA0 = lA0 > 1e-4 ? [vA0[0] / lA0, vA0[1] / lA0] : [-1, 0];
+
+                        let bestMerge = null, minD = snapRadius6;
+                        for (let j = i + 1; j < mergedCurves.length; j++) {
+                            const cB = mergedCurves[j];
+                            if (cB.isClosed || cB.workPts.length < 2 || cB.layer !== cA.layer) continue;
+                            const nB = cB.workPts.length;
+                            const epB0 = cB.workPts[0], epB1 = cB.workPts[nB - 1];
+                            const kB = Math.min(nB - 1, 6);
+                            const vB0 = [epB0[0] - cB.workPts[kB][0], epB0[1] - cB.workPts[kB][1]];
+                            const lB0 = Math.hypot(vB0[0], vB0[1]);
+                            const uB0 = lB0 > 1e-4 ? [vB0[0] / lB0, vB0[1] / lB0] : [-1, 0];
+                            const vB1 = [epB1[0] - cB.workPts[nB - 1 - kB][0], epB1[1] - cB.workPts[nB - 1 - kB][1]];
+                            const lB1 = Math.hypot(vB1[0], vB1[1]);
+                            const uB1 = lB1 > 1e-4 ? [vB1[0] / lB1, vB1[1] / lB1] : [1, 0];
+
+                            const d11 = Math.hypot(epA1[0] - epB0[0], epA1[1] - epB0[1]);
+                            if (d11 <= minD) {
+                                const dot = uA1[0] * uB0[0] + uA1[1] * uB0[1];
+                                const bridge = [(epB0[0] - epA1[0]) / Math.max(1e-4, d11), (epB0[1] - epA1[1]) / Math.max(1e-4, d11)];
+                                const dotB = uA1[0] * bridge[0] + uA1[1] * bridge[1];
+                                if (dot <= -0.70 && dotB >= 0.60) { minD = d11; bestMerge = { j, mode: 'A1_B0' }; }
+                            }
+                            const d10 = Math.hypot(epA1[0] - epB1[0], epA1[1] - epB1[1]);
+                            if (d10 <= minD) {
+                                const dot = uA1[0] * uB1[0] + uA1[1] * uB1[1];
+                                const bridge = [(epB1[0] - epA1[0]) / Math.max(1e-4, d10), (epB1[1] - epA1[1]) / Math.max(1e-4, d10)];
+                                const dotB = uA1[0] * bridge[0] + uA1[1] * bridge[1];
+                                if (dot <= -0.70 && dotB >= 0.60) { minD = d10; bestMerge = { j, mode: 'A1_B1' }; }
+                            }
+                            const d01 = Math.hypot(epA0[0] - epB1[0], epA0[1] - epB1[1]);
+                            if (d01 <= minD) {
+                                const dot = uA0[0] * uB1[0] + uA0[0] * uB1[1];
+                                const bridge = [(epB1[0] - epA0[0]) / Math.max(1e-4, d01), (epB1[1] - epA0[1]) / Math.max(1e-4, d01)];
+                                const dotB = uA0[0] * bridge[0] + uA0[1] * bridge[1];
+                                if (dot <= -0.70 && dotB >= 0.60) { minD = d01; bestMerge = { j, mode: 'A0_B1' }; }
+                            }
+                            const d00 = Math.hypot(epA0[0] - epB0[0], epA0[1] - epB0[1]);
+                            if (d00 <= minD) {
+                                const dot = uA0[0] * uB0[0] + uA0[1] * uB0[1];
+                                const bridge = [(epB0[0] - epA0[0]) / Math.max(1e-4, d00), (epB0[1] - epA0[1]) / Math.max(1e-4, d00)];
+                                const dotB = uA0[0] * bridge[0] + uA0[1] * bridge[1];
+                                if (dot <= -0.70 && dotB >= 0.60) { minD = d00; bestMerge = { j, mode: 'A0_B0' }; }
+                            }
+                        }
+                        if (bestMerge) {
+                            const cB = mergedCurves[bestMerge.j];
+                            let newPtsA = cA.workPts.slice(), newDenseA = (cA.densePts || cA.workPts).slice();
+                            let newPtsB = cB.workPts.slice(), newDenseB = (cB.densePts || cB.workPts).slice();
+                            if (bestMerge.mode === 'A1_B0') {
+                                cA.workPts = newPtsA.concat(newPtsB.slice(1));
+                                cA.densePts = newDenseA.concat(newDenseB);
+                            } else if (bestMerge.mode === 'A1_B1') {
+                                newPtsB.reverse(); newDenseB.reverse();
+                                cA.workPts = newPtsA.concat(newPtsB.slice(1));
+                                cA.densePts = newDenseA.concat(newDenseB);
+                            } else if (bestMerge.mode === 'A0_B1') {
+                                cA.workPts = newPtsB.concat(newPtsA.slice(1));
+                                cA.densePts = newDenseB.concat(newDenseA);
+                            } else if (bestMerge.mode === 'A0_B0') {
+                                newPtsB.reverse(); newDenseB.reverse();
+                                cA.workPts = newPtsB.concat(newPtsA.slice(1));
+                                cA.densePts = newDenseB.concat(newDenseA);
+                            }
+                            cA.lengthPx += cB.lengthPx;
+                            mergedCurves.splice(bestMerge.j, 1);
+                            changedMerge = true;
+                            break;
+                        }
+                    }
+                }
+                tracedCurves.length = 0;
+                for (let mc of mergedCurves) tracedCurves.push(mc);
+
+                // Render connected curves to vecVis
+                for (let tc of tracedCurves) {
+                    const simp = tc.workPts;
+                    const chColor = tc.layer === 'score'
+                        ? new cv.Scalar(239, 68, 68)
+                        : (tc.layer === 'crease' ? new cv.Scalar(34, 197, 94) : new cv.Scalar(59, 130, 246));
+                    for (let i = 1; i < simp.length; i++) {
+                        cv.line(vecVis, new cv.Point(Math.round(simp[i - 1][0]), Math.round(simp[i - 1][1])), new cv.Point(Math.round(simp[i][0]), Math.round(simp[i][1])), chColor, 2);
+                    }
+                }
+                showCanvas('6', vecVis, `${tracedCurves.length} Vectorized Curves (Scale: ${scaleX.toFixed(3)}×, Offset: +${roiX},+${roiY})`);
+                addLog(`Stage 6 done. Kept ${tracedCurves.length} curves.`, 'ok');
+
+                // STAGE 7 & 8: Shape Model Selection, Color Classification & Coordinate Un-scaling to Full Bed
+
+                let fitVis = rgbWork.clone();
+                const fittedCurves = [];
+                const layersData = {
+                    thru_cut: { paths: [], color: '#3b82f6' },
+                    score: { paths: [], color: '#ef4444' },
+                    crease: { paths: [], color: '#22c55e' }
+                };
+
+                let rawFitted = [];
+                try {
+                    for (let tc of tracedCurves) {
+                        if (tc.lengthPx < 18.0) continue;
+                        const samplePts = (tc.densePts && tc.densePts.length > 0) ? tc.densePts : tc.workPts;
+                        const layer = classifyCurveLayer(samplePts, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, tc.isClosed);
+                        if (!layer) continue;
+
+                        const fit = fitGeometricModel(tc.densePts, tc.workPts, tc.isClosed);
+                        // Mean strokeness along curve in zoomed ROI
+                        let sSum = 0;
+                        for (let p of samplePts) {
+                            const ix = Math.min(workW - 1, Math.max(0, Math.round(p[0])));
+                            const iy = Math.min(workH - 1, Math.max(0, Math.round(p[1])));
+                            sSum += satoRes.floatMap[iy * workW + ix];
+                        }
+                        const meanContrast = sSum / samplePts.length;
+
+                        // Reject horizontal cardboard corrugation flutes (faint ridges parallel to cardboard flutes)
+                        if (fit && fit.type === 'line' && fit.workPoints && fit.workPoints.length >= 2) {
+                            const p0 = fit.workPoints[0], p1 = fit.workPoints[fit.workPoints.length - 1];
+                            const dx = Math.abs(p1[0] - p0[0]), dy = Math.abs(p1[1] - p0[1]);
+                            const len = Math.hypot(dx, dy);
+                            if (len < 65.0 && (dy / Math.max(1, len)) < 0.14 && meanContrast < 0.28) {
+                                continue;
+                            }
+                        }
+                        const fitQual = Math.max(0, Math.min(1, 1 - fit.fitError / 6.0));
+                        const conf = 0.3 * fit.inlierRatio + 0.3 * Math.min(fit.coverage / 180, 1) + 0.2 * fitQual + 0.2 * meanContrast;
+                        rawFitted.push({ fit, layer, tc, meanContrast, conf });
+                    }
+
+                    // Geometric Constraint Solver: Line ray intersection & vertex snapping (eliminates arrow & corner gaps)
+                    const snapLines = [];
+                    for (let i = 0; i < rawFitted.length; i++) {
+                        const fit = rawFitted[i].fit;
+                        if (fit && fit.type === 'line' && fit.workPoints && fit.workPoints.length >= 2) {
+                            const p0 = fit.workPoints[0], p1 = fit.workPoints[fit.workPoints.length - 1];
+                            const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+                            const len = Math.hypot(dx, dy);
+                            if (len > 1.0) {
+                                snapLines.push({ i, fit, p0: [p0[0], p0[1]], p1: [p1[0], p1[1]], u: [dx / len, dy / len], len });
+                            }
+                        }
+                    }
+
+                    const maxSnapPx = 12.0;
+                    // 1. Collect all line endpoints
+                    const lineEps = [];
+                    for (let i = 0; i < snapLines.length; i++) {
+                        lineEps.push({ lineIdx: i, ep: 0, pt: snapLines[i].p0 });
+                        lineEps.push({ lineIdx: i, ep: 1, pt: snapLines[i].p1 });
+                    }
+
+                    // 2. Direct mutual-nearest endpoint cluster snapping within maxSnapPx (no transitive chaining)
+                    const adj = Array.from({ length: lineEps.length }, () => []);
+                    for (let a = 0; a < lineEps.length; a++) {
+                        for (let b = a + 1; b < lineEps.length; b++) {
+                            if (lineEps[a].lineIdx === lineEps[b].lineIdx) continue;
+                            const d = Math.hypot(lineEps[a].pt[0] - lineEps[b].pt[0], lineEps[a].pt[1] - lineEps[b].pt[1]);
+                            if (d <= maxSnapPx) {
+                                adj[a].push(b);
+                                adj[b].push(a);
+                            }
+                        }
+                    }
+
+                    const visitedEps = new Uint8Array(lineEps.length);
+                    for (let start = 0; start < lineEps.length; start++) {
+                        if (visitedEps[start] || adj[start].length === 0) continue;
+                        const cluster = [start];
+                        visitedEps[start] = 1;
+                        for (let v of adj[start]) {
+                            if (!visitedEps[v]) {
+                                visitedEps[v] = 1;
+                                cluster.push(v);
+                            }
+                        }
+                        if (cluster.length < 2) continue;
+
+                        let sx = 0, sy = 0;
+                        for (let ci of cluster) { sx += lineEps[ci].pt[0]; sy += lineEps[ci].pt[1]; }
+                        const bestVertex = [+(sx / cluster.length).toFixed(1), +(sy / cluster.length).toFixed(1)];
+
+                        for (let ci of cluster) {
+                            const ec = lineEps[ci];
+                            const sl = snapLines[ec.lineIdx];
+                            if (ec.ep === 0) {
+                                sl.p0 = bestVertex;
+                                sl.fit.workPoints[0] = bestVertex;
+                                sl.fit.params.x1 = bestVertex[0];
+                                sl.fit.params.y1 = bestVertex[1];
+                            } else {
+                                sl.p1 = bestVertex;
+                                sl.fit.workPoints[sl.fit.workPoints.length - 1] = bestVertex;
+                                sl.fit.params.x2 = bestVertex[0];
+                                sl.fit.params.y2 = bestVertex[1];
+                            }
+                        }
+                    }
+
+                    // Deduplicate collinear overlapping line segments (prevents muddy brown overlapping lines)
+                    const dedupRawFitted = [];
+                    for (let i = 0; i < rawFitted.length; i++) {
+                        const itemA = rawFitted[i];
+                        if (itemA.fit && itemA.fit.type === 'line' && itemA.fit.workPoints && itemA.fit.workPoints.length >= 2) {
+                            const pA0 = itemA.fit.workPoints[0], pA1 = itemA.fit.workPoints[itemA.fit.workPoints.length - 1];
+                            let duplicate = false;
+                            for (let j = 0; j < dedupRawFitted.length; j++) {
+                                const itemB = dedupRawFitted[j];
+                                if (itemB.fit && itemB.fit.type === 'line' && itemB.fit.workPoints && itemB.fit.workPoints.length >= 2) {
+                                    const pB0 = itemB.fit.workPoints[0], pB1 = itemB.fit.workPoints[itemB.fit.workPoints.length - 1];
+                                    const dDirect = Math.hypot(pA0[0] - pB0[0], pA0[1] - pB0[1]) + Math.hypot(pA1[0] - pB1[0], pA1[1] - pB1[1]);
+                                    const dOpp = Math.hypot(pA0[0] - pB1[0], pA0[1] - pB1[1]) + Math.hypot(pA1[0] - pB0[0], pA1[1] - pB0[1]);
+                                    if (dDirect < 8.0 || dOpp < 8.0) {
+                                        // If one is score (red) and one is crease (green), retain the red score boundary
+                                        if (itemA.layer === 'crease' && itemB.layer === 'score') {
+                                            duplicate = true;
+                                            break;
+                                        } else if (itemA.layer === 'score' && itemB.layer === 'crease') {
+                                            dedupRawFitted[j] = itemA;
+                                            duplicate = true;
+                                            break;
+                                        } else {
+                                            duplicate = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (duplicate) continue;
+                        }
+                        dedupRawFitted.push(itemA);
+                    }
+                    rawFitted = dedupRawFitted;
+                } catch (snapErr) {
+                    addLog('Warning in snap solver: ' + snapErr.message, 'warn');
+                }
+
+                for (let item of rawFitted) {
+                    const { fit, layer, tc, meanContrast, conf } = item;
+                    if (!fit || !fit.workPoints) continue;
+                    // Map coordinates from zoomed ROI working space -> full ArUco bed space
+                    const bedPts = fit.workPoints.map(p => [
+                        +(p[0] * scaleX + roiX).toFixed(2),
+                        +(p[1] * scaleY + roiY).toFixed(2)
+                    ]);
+
+                    const drawScalar = layer === 'score'
+                        ? new cv.Scalar(239, 68, 68)
+                        : (layer === 'crease' ? new cv.Scalar(34, 197, 94) : new cv.Scalar(59, 130, 246));
+
+                    let bedParams = { ...(fit.params || {}), layer };
+                    if (fit.type === 'circle') {
+                        const bedCx = +(fit.params.cx * scaleX + roiX).toFixed(2);
+                        const bedCy = +(fit.params.cy * scaleY + roiY).toFixed(2);
+                        const bedR = +(fit.params.r * 0.5 * (scaleX + scaleY)).toFixed(2);
+                        bedParams = { cx: bedCx, cy: bedCy, r: bedR, layer };
+                        cv.circle(fitVis, new cv.Point(Math.round(fit.params.cx), Math.round(fit.params.cy)), Math.round(fit.params.r), drawScalar, 2);
+                        layersData[layer].paths.push({ type: 'circle', cx: bedCx, cy: bedCy, r: bedR });
+                    } else if (fit.type === 'ellipse') {
+                        const bedCx = +(fit.params.cx * scaleX + roiX).toFixed(2);
+                        const bedCy = +(fit.params.cy * scaleY + roiY).toFixed(2);
+                        const bedRx = +(fit.params.rx * scaleX).toFixed(2);
+                        const bedRy = +(fit.params.ry * scaleY).toFixed(2);
+                        bedParams = { cx: bedCx, cy: bedCy, rx: bedRx, ry: bedRy, angle_deg: fit.params.angle_deg, layer };
+                        layersData[layer].paths.push({ type: 'ellipse', cx: bedCx, cy: bedCy, rx: bedRx, ry: bedRy, angle_deg: fit.params.angle_deg });
+                        for (let i = 1; i < fit.workPoints.length; i++) {
+                            cv.line(fitVis,
+                                new cv.Point(Math.round(fit.workPoints[i - 1][0]), Math.round(fit.workPoints[i - 1][1])),
+                                new cv.Point(Math.round(fit.workPoints[i][0]), Math.round(fit.workPoints[i][1])),
+                                drawScalar, 2);
+                        }
+                    } else {
+                        if (fit.type === 'line' && bedPts.length >= 2) {
+                            bedParams = {
+                                x1: bedPts[0][0], y1: bedPts[0][1],
+                                x2: bedPts[bedPts.length - 1][0], y2: bedPts[bedPts.length - 1][1],
+                                layer
+                            };
+                        }
+                        layersData[layer].paths.push({ type: 'path', points: bedPts });
+                        for (let i = 1; i < fit.workPoints.length; i++) {
+                            cv.line(fitVis,
+                                new cv.Point(Math.round(fit.workPoints[i - 1][0]), Math.round(fit.workPoints[i - 1][1])),
+                                new cv.Point(Math.round(fit.workPoints[i][0]), Math.round(fit.workPoints[i][1])),
+                                drawScalar, 2);
+                        }
+                    }
+
+                    fittedCurves.push({
+                        type: fit.type,
+                        layer: layer,
+                        params: bedParams,
+                        points: bedPts,
+                        length_px: +(tc ? tc.lengthPx.toFixed(1) : 0),
+                        mean_contrast: +meanContrast.toFixed(3),
+                        fit_error_px: +((fit.fitError || 0) * 0.5 * (scaleX + scaleY)).toFixed(2),
+                        confidence: +conf.toFixed(3)
+                    });
+                }
+                showCanvas('7', fitVis, `Fitted on Zoomed ROI (${fittedCurves.length} curves: ${fittedCurves.map(c => c.type + ':' + c.layer).join(', ') || 'none'})`);
+
+                const maxConf = fittedCurves.length ? Math.max(...fittedCurves.map(c => c.confidence)) : 0;
+                const status = maxConf >= 0.45 && fittedCurves.length > 0 ? 'detected' : 'not_detected';
+                const valBody = document.querySelector('#step-8 .step-body');
+                valBody.innerHTML = `<div class="step-meta">Status: <strong>${status}</strong> | Max Confidence: <strong>${maxConf.toFixed(3)}</strong> | Bed Offset: (${roiX}, ${roiY})\n` +
+                    fittedCurves.map((c, i) => `#${i + 1} [${c.type} / ${c.layer}] conf=${c.confidence} err=${c.fit_error_px}px contrast=${c.mean_contrast} len=${c.length_px}px`).join('\n') +
+                    `</div>`;
+                setStep('8', true);
+
+                // STAGE 9: Final 4-Layer SVG & JSON Output (Scaled to Full Bed in mm)
+                const cardboardPolyBed = [
+                    [roiX, roiY],
+                    [roiX + roiW, roiY],
+                    [roiX + roiW, roiY + roiH],
+                    [roiX, roiY + roiH]
+                ];
+                const svgResult = SvgGenerator.generateLayeredSvg(layersData, fullBedW, fullBedH, frameConfig, cardboardPolyBed);
+                const svgBody = document.querySelector('#step-9 .step-body');
+                svgBody.innerHTML = svgResult.svg;
+                const jsonMeta = document.createElement('div');
+                jsonMeta.className = 'step-meta';
+                jsonMeta.textContent = `${fittedCurves.length} curves | 4 Layers (bed, red, green, blue) | Full Bed: ${svgResult.meta.physical_width}×${svgResult.meta.physical_height} mm (${svgResult.meta.dots_per_mm.toFixed(2)} px/mm)`;
+                svgBody.appendChild(jsonMeta);
+                setStep('9', true);
+
+                // STAGE 10: Full-Resolution QC Overlay (50% Opacity on Flattened ROI Photo)
+                let qcBase = rgbRoi.clone();
+                let qcDraw = rgbRoi.clone();
+                cv.rectangle(qcDraw, new cv.Point(2, 2), new cv.Point(roiW - 3, roiH - 3), new cv.Scalar(136, 136, 136), 2);
+                for (let c of fittedCurves) {
+                    const col = (c.layer === 'score' || c.layer === 'red')
+                        ? new cv.Scalar(229, 57, 53)
+                        : ((c.layer === 'crease' || c.layer === 'green') ? new cv.Scalar(67, 160, 71) : new cv.Scalar(30, 136, 229));
+                    if (c.type === 'circle' && c.params && c.params.r) {
+                        cv.circle(qcDraw, new cv.Point(Math.round(c.params.cx - roiX), Math.round(c.params.cy - roiY)), Math.round(c.params.r), col, 3);
+                    } else if (c.points && c.points.length >= 2) {
+                        for (let k = 1; k < c.points.length; k++) {
+                            cv.line(qcDraw,
+                                new cv.Point(Math.round(c.points[k - 1][0] - roiX), Math.round(c.points[k - 1][1] - roiY)),
+                                new cv.Point(Math.round(c.points[k][0] - roiX), Math.round(c.points[k][1] - roiY)),
+                                col, 3);
+                        }
+                    }
+                }
+                let qcBlend = new cv.Mat();
+                cv.addWeighted(qcBase, 0.5, qcDraw, 0.5, 0.0, qcBlend);
+                showCanvas('10', qcBlend, `Full-Resolution QC Overlay (${roiW}×${roiH} px, 50% Opacity, ${fittedCurves.length} strokes)`);
+                qcBase.delete(); qcDraw.delete(); qcBlend.delete();
+
+                addLog(`Stage 9 done. Status=${status}, Curves=${fittedCurves.length}, Confidence=${maxConf.toFixed(3)}`, 'ok');
+
+                // Cleanup
+                src.delete(); workImg.delete(); roiCropMat.delete(); roiMaskCrop.delete();
+                grayRoi.delete(); rgbRoi.delete(); labRoi.delete();
+                lRoi.delete(); aRoi.delete(); bRoi.delete(); labPlanes.delete();
+                ignoreMask.delete(); lWork.delete(); aWork.delete(); bWork.delete();
+                ignoreWork.delete(); rgbWork.delete(); flatBi.delete(); satoMat.delete();
+                bgAMat.delete(); bgBMat.delete();
+                hystMat.delete(); cleanMask.delete(); skelVis.delete(); vecVis.delete(); fitVis.delete();
+            } catch (err) {
+                addLog('ERROR: ' + err.message, 'err');
+                console.error(err);
+            }
+            document.getElementById('btnRun').disabled = false;
+        });
+    </script>
+</body>
+
+</html>

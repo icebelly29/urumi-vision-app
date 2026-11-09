@@ -1,48 +1,91 @@
 class SvgGenerator {
-    static generateLayeredSvg(layersData, width, height, frameConfig) {
-        let physWidth = 176;
-        let physHeight = 256;
+    static generateLayeredSvg(layersData, width, height, frameConfig, cardboardPolyBed = null) {
+        let physWidth = 775.0;
+        let physHeight = 1065.0;
 
         if (frameConfig) {
-            physWidth = frameConfig.cropPhysW;
-            physHeight = frameConfig.cropPhysH;
+            physWidth = frameConfig.cropPhysW || 775.0;
+            physHeight = frameConfig.cropPhysH || 1065.0;
         }
 
-        // dotsPerMm: how many image pixels = 1 physical millimeter
         const dotsPerMm = width / physWidth;
-
-        // SVG coordinate system: 1 SVG unit = 1 mm.
-        // All path coordinates are divided by dotsPerMm to convert pixels → mm.
-        // viewBox matches the physical mm dimensions exactly.
-        // SVG uses top-left origin, same as the warped image. No Y-flip needed.
-        // Any G-code coordinate flipping should happen in the post-processor.
         const toMm = (px) => (px / dotsPerMm);
         const toMmX = (px) => toMm(px).toFixed(3);
         const toMmY = (px) => toMm(px).toFixed(3);
 
         let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${physWidth} ${physHeight}" width="100%" style="display:block;">\n`;
-        svg += `  <style>path { fill: none; stroke-width: 0.5mm; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }</style>\n`;
+        svg += `  <style>path, circle, ellipse, polygon, polyline, line, rect { fill: none; stroke-width: 1; stroke-linejoin: round; stroke-linecap: round; }</style>\n`;
 
-        // 1. Bed Frame Layer — the boundary of the physical frame in mm
-        svg += `  <g id="layer_bed_frame">\n`;
-        svg += `    <rect x="0" y="0" width="${physWidth}" height="${physHeight}" fill="none" stroke="#FF00FF" stroke-width="0.5"/>\n`;
+        // 1. Bed Reference Layer
+        svg += `  <g id="bed" data-role="reference">\n`;
+        svg += `    <rect x="0" y="0" width="${physWidth}" height="${physHeight}" fill="none" stroke="#888" stroke-width="0.6" stroke-dasharray="4,4" data-role="reference"/>\n`;
+        if (cardboardPolyBed && cardboardPolyBed.length >= 3) {
+            const cbPts = cardboardPolyBed.map(pt => `${toMmX(pt[0])},${toMmY(pt[1])}`).join(' ');
+            svg += `    <polygon points="${cbPts}" fill="none" stroke="#888" stroke-width="0.6" stroke-dasharray="4,4" data-role="reference"/>\n`;
+        }
         svg += `  </g>\n`;
 
-        // 2. Data Layers — all coordinates in mm
-        for (const [layerId, data] of Object.entries(layersData)) {
-            if (data.paths.length === 0) continue;
+        // 2. Color Layers in strict order: red, green, blue
+        const orderedLayers = [
+            { id: 'red', defaultColor: '#e53935', aliases: ['red', 'score'] },
+            { id: 'green', defaultColor: '#43a047', aliases: ['green', 'crease'] },
+            { id: 'blue', defaultColor: '#1e88e5', aliases: ['blue', 'thru_cut'] }
+        ];
 
-            svg += `  <g id="${layerId}">\n`;
-            data.paths.forEach(shape => {
+        for (const layerSpec of orderedLayers) {
+            let paths = [];
+            let strokeColor = layerSpec.defaultColor;
+            for (const alias of layerSpec.aliases) {
+                if (layersData && layersData[alias] && Array.isArray(layersData[alias].paths)) {
+                    paths = paths.concat(layersData[alias].paths);
+                    if (layersData[alias].color) strokeColor = layersData[alias].color;
+                }
+            }
+            svg += `  <g id="${layerSpec.id}">\n`;
+            const commonAttrs = `fill="none" stroke="${strokeColor}" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"`;
+            paths.forEach(shape => {
                 if (shape.type === 'circle') {
-                    svg += `    <circle cx="${toMmX(shape.cx)}" cy="${toMmY(shape.cy)}" r="${toMm(shape.r).toFixed(3)}" fill="none" stroke="${data.color}" stroke-width="0.5"/>\n`;
+                    svg += `    <circle cx="${toMmX(shape.cx)}" cy="${toMmY(shape.cy)}" r="${toMm(shape.r).toFixed(3)}" ${commonAttrs}/>\n`;
+                } else if (shape.type === 'ellipse') {
+                    const cxMm = toMmX(shape.cx);
+                    const cyMm = toMmY(shape.cy);
+                    const rxMm = toMm(shape.rx).toFixed(3);
+                    const ryMm = toMm(shape.ry).toFixed(3);
+                    const ang = (shape.angle_deg || 0).toFixed(1);
+                    svg += `    <ellipse cx="${cxMm}" cy="${cyMm}" rx="${rxMm}" ry="${ryMm}" transform="rotate(${ang} ${cxMm} ${cyMm})" ${commonAttrs}/>\n`;
+                } else if (shape.type === 'rect') {
+                    const xMm = toMmX(shape.x);
+                    const yMm = toMmY(shape.y);
+                    const wMm = toMm(shape.width).toFixed(3);
+                    const hMm = toMm(shape.height).toFixed(3);
+                    const ang = +(shape.angle_deg || 0);
+                    if (Math.abs(ang) > 0.5) {
+                        const cxMm = (parseFloat(xMm) + 0.5 * parseFloat(wMm)).toFixed(3);
+                        const cyMm = (parseFloat(yMm) + 0.5 * parseFloat(hMm)).toFixed(3);
+                        svg += `    <rect x="${xMm}" y="${yMm}" width="${wMm}" height="${hMm}" transform="rotate(${ang.toFixed(1)} ${cxMm} ${cyMm})" ${commonAttrs}/>\n`;
+                    } else {
+                        svg += `    <rect x="${xMm}" y="${yMm}" width="${wMm}" height="${hMm}" ${commonAttrs}/>\n`;
+                    }
                 } else if (shape.type === 'polygon') {
                     const pts = shape.points.map(pt => `${toMmX(pt[0])},${toMmY(pt[1])}`).join(' ');
-                    svg += `    <polygon points="${pts}" fill="none" stroke="${data.color}" stroke-width="0.5" stroke-linejoin="round"/>\n`;
+                    svg += `    <polygon points="${pts}" ${commonAttrs}/>\n`;
+                } else if (shape.type === 'line') {
+                    svg += `    <line x1="${toMmX(shape.x1)}" y1="${toMmY(shape.y1)}" x2="${toMmX(shape.x2)}" y2="${toMmY(shape.y2)}" ${commonAttrs}/>\n`;
+                } else if (shape.type === 'bezier' && shape.beziers && shape.beziers.length > 0) {
+                    const b0 = shape.beziers[0];
+                    let d = `M ${toMmX(b0[0][0])},${toMmY(b0[0][1])}`;
+                    for (const seg of shape.beziers) {
+                        d += ` C ${toMmX(seg[1][0])},${toMmY(seg[1][1])} ${toMmX(seg[2][0])},${toMmY(seg[2][1])} ${toMmX(seg[3][0])},${toMmY(seg[3][1])}`;
+                    }
+                    svg += `    <path d="${d}" ${commonAttrs}/>\n`;
+                } else if (shape.type === 'polyline' || shape.type === 'freehand') {
+                    if (!shape.points || shape.points.length < 2) return;
+                    const pts = shape.points.map(pt => `${toMmX(pt[0])},${toMmY(pt[1])}`).join(' ');
+                    svg += `    <polyline points="${pts}" ${commonAttrs}/>\n`;
                 } else if (shape.type === 'path') {
-                    if (shape.points.length < 2) return;
+                    if (!shape.points || shape.points.length < 2) return;
                     const d = `M ${shape.points.map(pt => `${toMmX(pt[0])},${toMmY(pt[1])}`).join(' L ')}`;
-                    svg += `    <path d="${d}" fill="none" stroke="${data.color}" stroke-width="0.5" stroke-linejoin="round" stroke-linecap="round"/>\n`;
+                    svg += `    <path d="${d}" ${commonAttrs}/>\n`;
                 }
             });
             svg += `  </g>\n`;

@@ -15,6 +15,17 @@ class ImageProcessor {
         
         this.warpEngine = new WarpEngine(this.OUTPUT_WIDTH);
         this.inkExtractor = new InkExtractor(this.colorProfiles);
+        this.cardboardDetector = null;
+    }
+
+    async detectWorkpiece(imageCanvasOrMat, threshold = 0.25) {
+        if (!this.cardboardDetector && typeof CardboardDetector !== 'undefined') {
+            this.cardboardDetector = new CardboardDetector();
+        }
+        if (!this.cardboardDetector) {
+            throw new Error("CardboardDetector is not loaded.");
+        }
+        return await this.cardboardDetector.detect(imageCanvasOrMat, threshold);
     }
 
     async flatten(imageElement) {
@@ -40,7 +51,7 @@ class ImageProcessor {
         return canvas;
     }
 
-    async processFlattened(flattenedCanvas, maskCanvas = null) {
+    async processFlattened(flattenedCanvas, maskCanvas = null, enabledColors = null) {
         console.log("Processing Flattened Image...");
         let warpedMat = cv.imread(flattenedCanvas);
         let warpedMask = null;
@@ -51,7 +62,7 @@ class ImageProcessor {
         }
 
         // Extract paths by color
-        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask);
+        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask, enabledColors);
 
         // Generate Layered SVG
         const resultLayered = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, this.warpEngine.currentFrameConfig);
@@ -72,7 +83,7 @@ class ImageProcessor {
         };
     }
 
-    async process(imageElement, maskCanvas = null) {
+    async process(imageElement, maskCanvas = null, enabledColors = null) {
         if (!cv || !cv.Mat) {
             throw new Error("OpenCV is not initialized yet.");
         }
@@ -98,7 +109,7 @@ class ImageProcessor {
         const warpedMask = warpResult.mask; // Might be null
 
         // 2. Extract paths by color
-        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask);
+        const layersData = this.inkExtractor.extractColorPaths(warpedMat, this.warpEngine.currentFrameConfig, this.warpEngine.borderSizeMm, warpedMask, enabledColors);
 
         // 3. Generate Layered SVG
         const resultLayered = SvgGenerator.generateLayeredSvg(layersData, warpedMat.cols, warpedMat.rows, this.warpEngine.currentFrameConfig);

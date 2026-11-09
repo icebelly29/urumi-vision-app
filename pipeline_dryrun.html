@@ -190,7 +190,36 @@
         <span id="opencvStatus">OpenCV loading...</span>
         <label for="fileInput">Select Image:</label>
         <input type="file" id="fileInput" accept="image/*" disabled>
-        <label style="margin-left:10px;"><input type="checkbox" id="useLasso"> Pause for Lasso Tool</label>
+        <label style="margin-left:10px; font-weight: bold; color: #1e40af;">
+            ROI Detector:
+            <select id="roiDetectorSelect" style="padding: 2px 6px; font-size: 13px;">
+                <option value="contour" selected>OpenCV Contours (Accurate)</option>
+                <option value="yolo">YOLO ONNX</option>
+                <option value="none">None (Full Bed)</option>
+            </select>
+        </label>
+        <label style="margin-left:10px; font-weight: bold; color: #334155;">
+            Shave Edge:
+            <input type="number" id="roiInset" value="20" min="0" max="150" step="5" style="width: 55px; padding: 2px 4px; font-size: 13px;" title="Inward padding in pixels to shave off cardboard edges"> px
+        </label>
+        <label style="margin-left:10px;">
+            <input type="checkbox" id="useLasso" checked> Review / Edit ROI with Lasso
+        </label>
+        <div style="display: flex; align-items: center; gap: 8px; margin-left: 10px; padding: 4px 8px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 4px;">
+            <span style="font-weight: bold; font-size: 12px; color: #334155;">Active Pens:</span>
+            <label style="color: #2563eb; font-weight: 600; cursor: pointer; font-size: 12px;">
+                <input type="checkbox" id="penBlue" checked> Blue (Cut)
+            </label>
+            <label style="color: #dc2626; font-weight: 600; cursor: pointer; font-size: 12px;">
+                <input type="checkbox" id="penRed" checked> Red (Score)
+            </label>
+            <label style="color: #16a34a; font-weight: 600; cursor: pointer; font-size: 12px;">
+                <input type="checkbox" id="penGreen" checked> Green (Crease)
+            </label>
+            <label style="color: #111827; font-weight: 600; cursor: pointer; font-size: 12px;">
+                <input type="checkbox" id="penBlack" checked> Black (Cut)
+            </label>
+        </div>
         <button id="btnRun" disabled>Run Pipeline</button>
     </div>
 
@@ -257,6 +286,19 @@
                     <div>
                         <div class="step-title">HSV Conversion</div>
                         <div class="step-desc">COLOR_RGBA2RGB → COLOR_RGB2HSV</div>
+                    </div>
+                </div>
+                <div class="step-body">
+                    <div class="step-empty">Waiting...</div>
+                </div>
+            </div>
+
+            <div class="step" id="step-cielab">
+                <div class="step-header">
+                    <div class="step-num" id="num-cielab">4B</div>
+                    <div>
+                        <div class="step-title">CIELAB &amp; Color Spectrum</div>
+                        <div class="step-desc">COLOR_RGB2Lab — L* lightness, a* green-red, b* blue-yellow &amp; palette</div>
                     </div>
                 </div>
                 <div class="step-body">
@@ -362,11 +404,14 @@
         </div>
     </div>
 
-    <!-- Scripts — same as index.html -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
     <script src="lib/trace_skeleton.js"></script>
     <script src="pipeline/WarpEngine.js"></script>
     <script src="pipeline/InkExtractor.js"></script>
     <script src="pipeline/SvgGenerator.js"></script>
+    <script src="pipeline/CardboardDetector.js"></script>
+    <script src="pipeline/ContourRoiDetector.js"></script>
+    <script src="pipeline/ColorSpectrumAnalyzer.js"></script>
     <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
 
     <script>
@@ -426,10 +471,11 @@
 
         let loadedImg = null;
 
-        function openLassoToolAsync(warpedMat) {
+        function openLassoToolAsync(warpedMat, initialBox = null) {
             return new Promise((resolve) => {
                 const lassoModal = document.getElementById('lassoModal');
                 const lassoCanvas = document.getElementById('lassoCanvas');
+                const lassoTitle = document.querySelector('.lasso-title');
                 const btnPoly = document.getElementById('btnLassoPoly');
                 const btnRect = document.getElementById('btnLassoRect');
                 const btnClear = document.getElementById('btnLassoClear');
@@ -455,6 +501,17 @@
                 let rectStart = null;
                 let rectEnd = null;
 
+                if (initialBox) {
+                    const label = initialBox.type === 'contour' ? 'OpenCV Contours' : 'YOLO';
+                    lassoTitle.textContent = `Auto-Detected ROI (${label}). Confirm or adjust:`;
+                    currentMode = 'rect';
+                    rectStart = { x: initialBox.x * scale, y: initialBox.y * scale };
+                    rectEnd = { x: (initialBox.x + initialBox.width) * scale, y: (initialBox.y + initialBox.height) * scale };
+                } else {
+                    lassoTitle.textContent = "Select area to process";
+                    currentMode = 'poly';
+                }
+
                 function render() {
                     ctx.clearRect(0, 0, lassoCanvas.width, lassoCanvas.height);
                     ctx.drawImage(offscreen, 0, 0, lassoCanvas.width, lassoCanvas.height);
@@ -468,7 +525,7 @@
                             ctx.moveTo(points[0].x, points[0].y);
                             for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
                             ctx.closePath();
-                        } else if (currentMode === 'rect' && rectStart && rectEnd) {
+                        } else if (rectStart && rectEnd) {
                             ctx.rect(rectStart.x, rectStart.y, rectEnd.x - rectStart.x, rectEnd.y - rectStart.y);
                         }
                         ctx.clip();
@@ -484,7 +541,7 @@
                         for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
                         if (points.length > 2) ctx.closePath();
                         ctx.stroke();
-                    } else if (currentMode === 'rect' && rectStart && rectEnd) {
+                    } else if (rectStart && rectEnd) {
                         ctx.strokeRect(rectStart.x, rectStart.y, rectEnd.x - rectStart.x, rectEnd.y - rectStart.y);
                     }
                 }
@@ -493,14 +550,18 @@
 
                 const setMode = (mode) => {
                     currentMode = mode;
-                    points = []; rectStart = null; rectEnd = null;
+                    if (mode === 'poly' && rectStart) {
+                        points = [];
+                        rectStart = null; rectEnd = null;
+                    }
                     btnPoly.style.borderColor = mode === 'poly' ? '#3B82F6' : '#444';
                     btnRect.style.borderColor = mode === 'rect' ? '#3B82F6' : '#444';
                     render();
                 };
                 btnPoly.onclick = () => setMode('poly');
                 btnRect.onclick = () => setMode('rect');
-                setMode('poly');
+                btnPoly.style.borderColor = currentMode === 'poly' ? '#3B82F6' : '#444';
+                btnRect.style.borderColor = currentMode === 'rect' ? '#3B82F6' : '#444';
 
                 btnClear.onclick = () => { points = []; rectStart = null; rectEnd = null; render(); };
 
@@ -542,7 +603,7 @@
                         const scaleX = warpedMat.cols / lassoCanvas.width;
                         const scaleY = warpedMat.rows / lassoCanvas.height;
 
-                        if ((currentMode === 'poly' && points.length > 2) || (currentMode === 'rect' && rectStart && rectEnd)) {
+                        if ((currentMode === 'poly' && points.length > 2) || (rectStart && rectEnd)) {
                             let pointArray = [];
                             if (currentMode === 'poly') {
                                 for (let pt of points) {
@@ -682,12 +743,76 @@
                 showCanvas('warp', warpedMat, `${warpedMat.cols} × ${warpedMat.rows} px — corrected flat view`);
 
                 let userMaskMat = null;
-                if (document.getElementById('useLasso').checked) {
-                    addLog('Waiting for Lasso Tool input...', 'warn');
-                    userMaskMat = await openLassoToolAsync(warpedMat);
-                    if (userMaskMat) {
-                        showCanvas('warp', userMaskMat, `User Lasso Mask (applied in Step 7)`, true);
+                const roiMethod = document.getElementById('roiDetectorSelect').value;
+                const useLassoChecked = document.getElementById('useLasso').checked;
+
+                let detectedBox = null;
+                if (roiMethod === 'contour') {
+                    addLog('Running OpenCV Contour Workpiece Auto-Detection...', 'info');
+                    try {
+                        detectedBox = ContourRoiDetector.detect(warpedMat, { padding: 35, frameMargin: 90 });
+                        if (detectedBox) {
+                            addLog(`OpenCV Detected ROI: [x:${detectedBox.x}, y:${detectedBox.y}, w:${detectedBox.width}, h:${detectedBox.height}]`, 'ok');
+                        } else {
+                            addLog('OpenCV: No distinct workpiece or ink detected inside margins.', 'warn');
+                        }
+                    } catch (detErr) {
+                        addLog('OpenCV Contour Detection Warning: ' + detErr.message, 'warn');
+                        console.warn(detErr);
                     }
+                } else if (roiMethod === 'yolo') {
+                    addLog('Running YOLO Workpiece Auto-Detection...', 'info');
+                    try {
+                        const detector = new CardboardDetector();
+                        detectedBox = await detector.detect(warpedMat, 0.25);
+                        if (detectedBox) {
+                            addLog(`YOLO Detected Cardboard: [x:${detectedBox.x}, y:${detectedBox.y}, w:${detectedBox.width}, h:${detectedBox.height}] Conf: ${(detectedBox.confidence * 100).toFixed(1)}%`, 'ok');
+                        } else {
+                            addLog('YOLO: No cardboard workpiece detected above confidence threshold.', 'warn');
+                        }
+                    } catch (detErr) {
+                        addLog('YOLO Detection Warning: ' + detErr.message, 'warn');
+                        console.warn(detErr);
+                    }
+                }
+
+                // Inward padding to shave off physical cardboard edges and shadows
+                if (detectedBox) {
+                    const shavePx = Math.max(0, parseInt(document.getElementById('roiInset')?.value || '20', 10));
+                    if (shavePx > 0) {
+                        const insetX = Math.min(shavePx, Math.floor(detectedBox.width * 0.4));
+                        const insetY = Math.min(shavePx, Math.floor(detectedBox.height * 0.4));
+                        detectedBox.x += insetX;
+                        detectedBox.y += insetY;
+                        detectedBox.width = Math.max(10, detectedBox.width - (2 * insetX));
+                        detectedBox.height = Math.max(10, detectedBox.height - (2 * insetY));
+                        addLog(`Shaved ${shavePx}px cardboard edge: [x:${detectedBox.x}, y:${detectedBox.y}, w:${detectedBox.width}, h:${detectedBox.height}]`, 'info');
+                    }
+                }
+
+                // If user checked "Review / Edit ROI with Lasso", open lasso modal (prepopulated with detected box if available)
+                if (useLassoChecked) {
+                    addLog('Opening Lasso Tool for review...', 'warn');
+                    userMaskMat = await openLassoToolAsync(warpedMat, detectedBox);
+                    if (userMaskMat) {
+                        showCanvas('warp', userMaskMat, `Confirmed Workpiece ROI Mask (applied in Step 7)`, true);
+                    }
+                } else if (detectedBox) {
+                    // Auto-detected without manual review
+                    userMaskMat = cv.Mat.zeros(warpedMat.rows, warpedMat.cols, cv.CV_8UC1);
+                    const rectPointArray = [
+                        detectedBox.x, detectedBox.y,
+                        detectedBox.x + detectedBox.width, detectedBox.y,
+                        detectedBox.x + detectedBox.width, detectedBox.y + detectedBox.height,
+                        detectedBox.x, detectedBox.y + detectedBox.height
+                    ];
+                    const ptMat = cv.matFromArray(4, 1, cv.CV_32SC2, rectPointArray);
+                    const pointVector = new cv.MatVector();
+                    pointVector.push_back(ptMat);
+                    cv.fillPoly(userMaskMat, pointVector, new cv.Scalar(255, 255, 255, 255));
+                    ptMat.delete(); pointVector.delete();
+                    showCanvas('warp', userMaskMat, `Auto-Detected ROI Mask (${roiMethod})`, true);
+                    addLog('Auto-detected workpiece ROI mask applied.', 'ok');
                 }
 
                 addLog(`Step 3 done. Output: ${warpedMat.cols}×${warpedMat.rows}`, 'ok');
@@ -709,6 +834,130 @@
 
                 hsvDisplay.delete();
                 addLog('Step 4 done.', 'ok');
+
+                // STEP 4B — CIELAB & Color Spectrum
+                addLog('Step 4B: CIELAB color space & spectrum analysis...', 'info');
+                try {
+                    const labAnalysis = ColorSpectrumAnalyzer.analyze(warpedMat, userMaskMat);
+
+                    // Show CIELAB representation and split channels
+                    showCanvas('cielab', labAnalysis.labMat, `Full CIELAB Color Space (L*, a*, b*)`);
+                    showCanvas('cielab', labAnalysis.lPlane, `L* Lightness Channel (0=Black, 100=White)`, true);
+                    showCanvas('cielab', labAnalysis.aPlane, `a* Axis Channel (Green < 128 < Red)`, true);
+                    showCanvas('cielab', labAnalysis.bPlane, `b* Axis Channel (Blue < 128 < Yellow)`, true);
+
+                    const stepBodyCielab = document.querySelector('#step-cielab .step-body');
+
+                    // Render 2D a* vs b* Chromaticity Spectrum heatmaps (Side-by-Side: Full Canvas vs Thin Ink Strokes)
+                    const heatmapRow = document.createElement('div');
+                    heatmapRow.style.display = 'flex';
+                    heatmapRow.style.flexWrap = 'wrap';
+                    heatmapRow.style.gap = '12px';
+                    heatmapRow.style.margin = '14px 0';
+
+                    // 1. Full Canvas Heatmap
+                    const fullHeatmapWrapper = document.createElement('div');
+                    fullHeatmapWrapper.style.flex = '1';
+                    fullHeatmapWrapper.style.minWidth = '240px';
+                    const fullCanvas = ColorSpectrumAnalyzer.renderChromaticitySpectrum(labAnalysis.fullAbHistogram, 260, 200, 'Full Canvas Spectrum');
+                    fullHeatmapWrapper.appendChild(fullCanvas);
+                    const fullMeta = document.createElement('div');
+                    fullMeta.className = 'step-meta';
+                    fullMeta.textContent = 'Full Canvas Chromaticity (Dominant Background)';
+                    fullHeatmapWrapper.appendChild(fullMeta);
+                    heatmapRow.appendChild(fullHeatmapWrapper);
+
+                    // 2. Thin Ink Strokes Heatmap
+                    const inkHeatmapWrapper = document.createElement('div');
+                    inkHeatmapWrapper.style.flex = '1';
+                    inkHeatmapWrapper.style.minWidth = '240px';
+                    const inkCanvas = ColorSpectrumAnalyzer.renderChromaticitySpectrum(labAnalysis.inkAbHistogram, 260, 200, 'Thin Pen Strokes Spectrum');
+                    inkHeatmapWrapper.appendChild(inkCanvas);
+                    const inkMeta = document.createElement('div');
+                    inkMeta.className = 'step-meta';
+                    inkMeta.textContent = 'Thin Ink Strokes Chromaticity (Non-Dominant Pen Lines)';
+                    inkHeatmapWrapper.appendChild(inkMeta);
+                    heatmapRow.appendChild(inkHeatmapWrapper);
+
+                    stepBodyCielab.appendChild(heatmapRow);
+
+                    // Palette helper
+                    const createPaletteSection = (title, items, isInk) => {
+                        const container = document.createElement('div');
+                        container.style.display = 'flex';
+                        container.style.flexDirection = 'column';
+                        container.style.gap = '8px';
+                        container.style.marginTop = '12px';
+
+                        const header = document.createElement('div');
+                        header.style.fontWeight = 'bold';
+                        header.style.fontSize = '12px';
+                        header.style.color = isInk ? '#0284c7' : '#334155';
+                        header.textContent = title;
+                        container.appendChild(header);
+
+                        if (!items || items.length === 0) {
+                            const emptyMsg = document.createElement('div');
+                            emptyMsg.style.fontSize = '11px';
+                            emptyMsg.style.color = '#94a3b8';
+                            emptyMsg.textContent = 'No distinct color clusters detected in this region.';
+                            container.appendChild(emptyMsg);
+                            return container;
+                        }
+
+                        for (const col of items) {
+                            const chip = document.createElement('div');
+                            chip.style.display = 'flex';
+                            chip.style.alignItems = 'center';
+                            chip.style.gap = '10px';
+                            chip.style.padding = '6px 10px';
+                            chip.style.background = isInk ? '#f0f9ff' : '#f8fafc';
+                            chip.style.border = isInk ? '1px solid #7dd3fc' : '1px solid #cbd5e1';
+                            chip.style.borderRadius = '4px';
+
+                            const colorBox = document.createElement('div');
+                            colorBox.style.width = '24px';
+                            colorBox.style.height = '24px';
+                            colorBox.style.borderRadius = '3px';
+                            colorBox.style.background = col.hex;
+                            colorBox.style.border = '1px solid #94a3b8';
+
+                            const infoText = document.createElement('div');
+                            infoText.style.fontSize = '11px';
+                            infoText.style.fontFamily = 'monospace';
+                            infoText.innerHTML = `<strong>${col.label}</strong> (${col.percentage}% ${isInk ? 'of ink strokes' : 'of canvas'})<br>` +
+                                `HEX: ${col.hex} | RGB: (${col.r}, ${col.g}, ${col.b}) | ` +
+                                `CIELAB: L*=${col.L}, a*=${col.a}, b*=${col.bLab}`;
+
+                            chip.appendChild(colorBox);
+                            chip.appendChild(infoText);
+                            container.appendChild(chip);
+                        }
+                        return container;
+                    };
+
+                    // Render Thin Pen Strokes Palette (Non-Dominant Colors)
+                    const inkPalette = ColorSpectrumAnalyzer.getDominantPalette(labAnalysis.inkSamples, 5, true);
+                    const inkSection = createPaletteSection('✏️ Thin Pen Stroke Colors (Non-Dominant Ink Lines):', inkPalette, true);
+                    stepBodyCielab.appendChild(inkSection);
+
+                    // Render Dominant Background Surface Palette
+                    const surfacePalette = ColorSpectrumAnalyzer.getDominantPalette(labAnalysis.fullSamples, 4, false);
+                    const surfaceSection = createPaletteSection('📦 Dominant Surface Colors (Cardboard & Background):', surfacePalette, false);
+                    stepBodyCielab.appendChild(surfaceSection);
+
+                    // Cleanup mats
+                    labAnalysis.labMat.delete();
+                    labAnalysis.lPlane.delete();
+                    labAnalysis.aPlane.delete();
+                    labAnalysis.bPlane.delete();
+
+                    setStep('cielab', true);
+                    addLog(`Step 4B done. ${inkPalette.length} ink stroke colors & ${surfacePalette.length} surface colors identified.`, 'ok');
+                } catch (cielabErr) {
+                    addLog('CIELAB Analysis Error: ' + cielabErr.message, 'warn');
+                    console.error(cielabErr);
+                }
 
                 // STEP 5 — Adaptive Threshold
                 addLog('Step 5: Adaptive threshold...', 'info');
@@ -738,37 +987,62 @@
                 cv.cvtColor(warpedMat, hsv2, cv.COLOR_RGBA2RGB);
                 cv.cvtColor(hsv2, hsv2, cv.COLOR_RGB2HSV);
 
-                let redMask1 = new cv.Mat(), redMask2 = new cv.Mat(), greenMask = new cv.Mat(), blueMask = new cv.Mat();
-                let r1L = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(0, 60, 40, 0));
-                let r1H = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(12, 255, 255, 0));
-                cv.inRange(hsv2, r1L, r1H, redMask1);
-                let r2L = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(168, 60, 40, 0));
-                let r2H = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(179, 255, 255, 0));
-                cv.inRange(hsv2, r2L, r2H, redMask2);
-                let gL = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(36, 60, 40, 0));
-                let gH = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(90, 255, 255, 0));
-                cv.inRange(hsv2, gL, gH, greenMask);
-                let bL = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(100, 80, 40, 0));
-                let bH = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(140, 255, 255, 0));
-                cv.inRange(hsv2, bL, bH, blueMask);
-                let coloredInkMask = new cv.Mat();
-                let combinedRed = new cv.Mat();
-                cv.bitwise_or(redMask1, redMask2, combinedRed);
-                cv.bitwise_or(combinedRed, greenMask, coloredInkMask);
-                cv.bitwise_or(coloredInkMask, blueMask, coloredInkMask);
+                const enabledColors = {
+                    blue: document.getElementById('penBlue').checked,
+                    red: document.getElementById('penRed').checked,
+                    green: document.getElementById('penGreen').checked,
+                    black: document.getElementById('penBlack').checked
+                };
 
-                showCanvas('darkgate', combinedRed, `Red Mask`, true);
-                showCanvas('darkgate', greenMask, `Green Mask`, true);
-                showCanvas('darkgate', blueMask, `Blue Mask`, true);
-                showCanvas('darkgate', coloredInkMask, `Combined Color Mask`, true);
+                let coloredInkMask = cv.Mat.zeros(warpedMat.rows, warpedMat.cols, cv.CV_8UC1);
+                let combinedRed = cv.Mat.zeros(warpedMat.rows, warpedMat.cols, cv.CV_8UC1);
 
-                [redMask1, redMask2, combinedRed, greenMask, blueMask, r1L, r1H, r2L, r2H, gL, gH, bL, bH, hsv2].forEach(m => m.delete());
+                if (enabledColors.red) {
+                    let redMask1 = new cv.Mat(), redMask2 = new cv.Mat();
+                    let r1L = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(0, 60, 40, 0));
+                    let r1H = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(12, 255, 255, 0));
+                    cv.inRange(hsv2, r1L, r1H, redMask1);
+                    let r2L = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(168, 60, 40, 0));
+                    let r2H = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(179, 255, 255, 0));
+                    cv.inRange(hsv2, r2L, r2H, redMask2);
+                    cv.bitwise_or(redMask1, redMask2, combinedRed);
+                    cv.bitwise_or(coloredInkMask, combinedRed, coloredInkMask);
+                    showCanvas('darkgate', combinedRed, `Red Mask (Score)`, true);
+                    [r1L, r1H, r2L, r2H, redMask1, redMask2].forEach(m => m.delete());
+                }
+
+                if (enabledColors.green) {
+                    let greenMask = new cv.Mat();
+                    let gL = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(35, 55, 40, 0));
+                    let gH = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(85, 255, 255, 0));
+                    cv.inRange(hsv2, gL, gH, greenMask);
+                    cv.bitwise_or(coloredInkMask, greenMask, coloredInkMask);
+                    showCanvas('darkgate', greenMask, `Green Mask (Crease)`, true);
+                    [gL, gH, greenMask].forEach(m => m.delete());
+                }
+
+                if (enabledColors.blue) {
+                    let blueMask = new cv.Mat();
+                    let bL = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(95, 65, 40, 0));
+                    let bH = new cv.Mat(hsv2.rows, hsv2.cols, hsv2.type(), new cv.Scalar(145, 255, 255, 0));
+                    cv.inRange(hsv2, bL, bH, blueMask);
+                    cv.bitwise_or(coloredInkMask, blueMask, coloredInkMask);
+                    showCanvas('darkgate', blueMask, `Blue Mask (Cut)`, true);
+                    [bL, bH, blueMask].forEach(m => m.delete());
+                }
+
+                showCanvas('darkgate', coloredInkMask, `Combined Active Color Mask`, true);
+                combinedRed.delete(); hsv2.delete();
                 addLog('Step 6 done.', 'ok');
 
                 // STEP 7 — All Strokes
                 addLog('Step 7: Combining ink masks...', 'info');
                 let allStrokes = new cv.Mat();
-                cv.bitwise_or(darkInk, coloredInkMask, allStrokes);
+                if (enabledColors.black) {
+                    cv.bitwise_or(darkInk, coloredInkMask, allStrokes);
+                } else {
+                    allStrokes = coloredInkMask.clone();
+                }
                 showCanvas('strokes', allStrokes, `Initial Combined Ink Masks`);
                 darkInk.delete(); coloredInkMask.delete();
                 let openK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
@@ -824,7 +1098,7 @@
                     crease: { layer: 'crease', color: '#22c55e' }
                 };
                 const inkExtractor = new InkExtractor(colorProfiles);
-                const layersData = inkExtractor.extractColorPaths(warpedMat, warpEngine.currentFrameConfig, warpEngine.borderSizeMm, userMaskMat || null);
+                const layersData = inkExtractor.extractColorPaths(warpedMat, warpEngine.currentFrameConfig, warpEngine.borderSizeMm, userMaskMat || null, enabledColors);
 
                 let totalPaths = 0;
                 for (const [id, data] of Object.entries(layersData)) {

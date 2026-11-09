@@ -1,0 +1,32 @@
+{
+  "image": "box_outline.jpg",
+  "input": [
+    2268,
+    4032
+  ],
+  "warped": [
+    2000,
+    2748
+  ],
+  "marker_ids": [
+    12,
+    13,
+    14,
+    15
+  ],
+  "max_score": 0.9308724403381348,
+  "n_above": 10,
+  "best_conf": 0.9308724403381348,
+  "raw_box": {
+    "x": 295,
+    "y": 444,
+    "width": 1244,
+    "height": 1500
+  },
+  "shaved_box": {
+    "x": 315,
+    "y": 464,
+    "width": 1204,
+    "height": 1460
+  }
+}

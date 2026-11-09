@@ -17,13 +17,7 @@ class WarpEngine {
         let detector = new cv.aruco_ArucoDetector(dictionary, parameters, refineParameters);
         detector.detectMarkers(gray, corners, ids);
 
-        if (ids.rows < 4) {
-            console.warn(`Only found ${ids.rows} markers. Need 4.`);
-            gray.delete(); corners.delete(); ids.delete(); dictionary.delete(); parameters.delete(); refineParameters.delete(); detector.delete();
-            return null;
-        }
-
-        // Map centers
+        // Map centers at 1x resolution
         let markerCenters = {};
         for (let i = 0; i < ids.rows; i++) {
             let id = ids.data32S[i];
@@ -33,10 +27,40 @@ class WarpEngine {
             markerCenters[id] = { x: cx, y: cy };
         }
 
+        // Fallback: if 1..3 markers found at 1x resolution, upscale 2x with cubic interpolation to recover small/angled corner markers
+        if (Object.keys(markerCenters).length >= 1 && Object.keys(markerCenters).length < 4) {
+            let upGray = new cv.Mat();
+            cv.resize(gray, upGray, new cv.Size(0, 0), 2.0, 2.0, cv.INTER_CUBIC);
+            let corners2 = new cv.MatVector();
+            let ids2 = new cv.Mat();
+            detector.detectMarkers(upGray, corners2, ids2);
+            for (let i = 0; i < ids2.rows; i++) {
+                let id = ids2.data32S[i];
+                if (markerCenters[id] === undefined) {
+                    let corner = corners2.get(i);
+                    let cx = (corner.data32F[0] + corner.data32F[2] + corner.data32F[4] + corner.data32F[6]) / 8.0;
+                    let cy = (corner.data32F[1] + corner.data32F[3] + corner.data32F[5] + corner.data32F[7]) / 8.0;
+                    markerCenters[id] = { x: cx, y: cy };
+                }
+            }
+            upGray.delete(); corners2.delete(); ids2.delete();
+        }
+
+        if (Object.keys(markerCenters).length < 4) {
+            console.warn(`Only found ${Object.keys(markerCenters).length} markers. Need 4.`);
+            gray.delete(); corners.delete(); ids.delete(); dictionary.delete(); parameters.delete(); refineParameters.delete(); detector.delete();
+            return null;
+        }
+
         // Instead of sorting by visual x/y (which breaks if the phone is rotated),
         // we strictly sort by the ArUco ID values. The frame generator ALWAYS issues IDs 
         // clockwise starting from Top-Left. Example (12=TL, 13=TR, 14=BR, 15=BL).
         let detectedIds = Object.keys(markerCenters).map(Number).sort((a, b) => a - b);
+        if ([12, 13, 14, 15].every(k => markerCenters[k] !== undefined)) {
+            detectedIds = [12, 13, 14, 15];
+        } else if (detectedIds.length > 4) {
+            detectedIds = detectedIds.slice(0, 4);
+        }
 
         if (detectedIds.length !== 4) {
             gray.delete(); corners.delete(); ids.delete(); dictionary.delete(); parameters.delete(); refineParameters.delete(); detector.delete();
@@ -62,7 +86,7 @@ class WarpEngine {
 
         if (detectedIds.includes(12) || detectedIds.includes(13) || detectedIds.includes(14) || detectedIds.includes(15)) {
             // Custom Frame Generator (IDs 12-15)
-            const urlParams = new URLSearchParams(window.location.search);
+            const urlParams = (typeof window !== 'undefined' && window.location) ? new URLSearchParams(window.location.search) : new URLSearchParams('');
             const customW = parseFloat(urlParams.get('w'));
             const customH = parseFloat(urlParams.get('h'));
             const physWidth = !isNaN(customW) ? customW : 830.0;
@@ -151,5 +175,4 @@ class WarpEngine {
 
         return { image: warped, mask: warpedMask };
     }
-
 }
