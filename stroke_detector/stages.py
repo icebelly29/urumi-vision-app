@@ -864,6 +864,18 @@ def stage4_hysteresis_threshold(
             valid_c[lbl_c[high_m]] = True
             valid_c[0] = False
 
+            # Gently close tiny cardboard-grain/flute gaps in hysteresis mask BEFORE speck rejection
+            hyst_u8 = (valid_c[lbl_c]).astype(np.uint8) * 255
+            close_sz = int(cfg.color_morph_close_size)
+            if close_sz >= 3:
+                el_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_sz, close_sz))
+                hyst_u8 = cv2.morphologyEx(hyst_u8, cv2.MORPH_CLOSE, el_close)
+                n_lbl_c, lbl_c, stats_c, _ = cv2.connectedComponentsWithStats(
+                    (hyst_u8 > 0).astype(np.uint8), connectivity=8
+                )
+                valid_c = np.ones(n_lbl_c, dtype=bool)
+                valid_c[0] = False
+
             raw_count = int(np.sum(valid_c))
             kept_count = 0
             rej_count = 0
@@ -938,20 +950,35 @@ def stage4_hysteresis_threshold(
                         cv2.drawContours(
                             c_u8, cnts_c, ci, 255, thickness=cv2.FILLED
                         )
-            # Retain pixel in color mask
+            # Retain pixel in color mask (zeroing out zoomed ROI border margin to prevent edge artifacts)
+            b_m = int(cfg.roi_border_margin_px)
+            if b_m > 0:
+                c_u8[:b_m, :] = 0
+                c_u8[-b_m:, :] = 0
+                c_u8[:, :b_m] = 0
+                c_u8[:, -b_m:] = 0
             color_masks[c_name] = c_u8 > 0
 
-        # Resolve overlaps by assigning overlapping pixels to the color with the larger strokeness response
+        # Resolve overlaps using spatially smoothed strokeness so single strokes do not jitter mid-line
+        smooth_sig = max(1.5, 2.0 * work_px_per_mm)
+        smooth_resp: Dict[str, np.ndarray] = {}
+        for c_name in color_names:
+            r_raw = enh.color_strokeness.get(c_name)
+            if r_raw is not None:
+                smooth_resp[c_name] = cv2.GaussianBlur(
+                    r_raw.astype(np.float32), (0, 0), sigmaX=smooth_sig, sigmaY=smooth_sig
+                )
+
         for i in range(len(color_names)):
             c1 = color_names[i]
             m1 = color_masks.get(c1)
-            r1 = enh.color_strokeness.get(c1)
+            r1 = smooth_resp.get(c1)
             if m1 is None or r1 is None:
                 continue
             for j in range(i + 1, len(color_names)):
                 c2 = color_names[j]
                 m2 = color_masks.get(c2)
-                r2 = enh.color_strokeness.get(c2)
+                r2 = smooth_resp.get(c2)
                 if m2 is None or r2 is None:
                     continue
                 ol = m1 & m2
@@ -1008,6 +1035,12 @@ def stage4_hysteresis_threshold(
     high_val = max(high_val, cfg.min_absolute_high)
     low_val = min(low_val, high_val * 0.85)
     low_val = max(low_val, cfg.min_absolute_high * 0.5)
+
+    print(
+        f"[Stage 4 Mask] hysteresis_low={cfg.color_hyst_low:.2f} (k_low_sigma={cfg.k_low_sigma:.2f}, gray_low={low_val:.3f}), "
+        f"hysteresis_high={cfg.color_hyst_high:.2f} (k_high_sigma={cfg.k_high_sigma:.2f}, gray_high={high_val:.3f}), "
+        f"close_kernel_size={cfg.color_morph_close_size}x{cfg.color_morph_close_size} ellipse"
+    )
 
     low_u8 = (s_map > low_val).astype(np.uint8)
     high_mask = s_map >= high_val
@@ -1167,11 +1200,336 @@ def _link_endpoints(skel: np.ndarray, max_dist: float, min_cos: float) -> np.nda
     return out
 
 
+def _classify_chain_dominant_color(
+    pts_c: np.ndarray,
+    is_cl: bool,
+    color_masks: Dict[str, np.ndarray],
+    prep: Optional[PreprocessOutput],
+    cfg: Config,
+    stroke_width_px: float,
+    fallback_color: Optional[str] = None,
+) -> Tuple[str, float]:
+    """Assign a single dominant color to an individual stroke segment via weighted majority vote.
+
+    Excludes low-saturation / over-darkened ink-pool pixels, trims endpoint/junction regions,
+    and requires clear LAB opponent separation so green/blue strokes do not default to red.
+    Returns (winning_color_name, confidence_ratio).
+    """
+    color_names = [c.name for c in cfg.colors if c.name in color_masks]
+    if not color_names:
+        color_names = list(color_masks.keys())
+    if not color_names:
+        return fallback_color or "blue", 1.0
+
+    default_fb = fallback_color if (fallback_color in color_names) else (
+        "blue" if "blue" in color_names else color_names[-1]
+    )
+
+    ref_mask = next(iter(color_masks.values()))
+    h, w = ref_mask.shape
+    n = len(pts_c)
+    if not is_cl and n >= 12:
+        trim = min(max(2, int(round(stroke_width_px))), n // 6)
+        sample_pts = pts_c[trim : n - trim]
+    else:
+        sample_pts = pts_c
+
+    step = max(1, len(sample_pts) // 80)
+    sample_pts = sample_pts[::step]
+
+    votes: Dict[str, float] = {cn: 0.0 for cn in color_names}
+    mask_votes: Dict[str, float] = {cn: 0.0 for cn in color_names}
+    sep = float(cfg.color_min_opponent_sep)
+
+    for pt in sample_pts:
+        ix = int(np.clip(round(float(pt[0])), 0, w - 1))
+        iy = int(np.clip(round(float(pt[1])), 0, h - 1))
+
+        # Exclude over-darkened / low-saturation ink-pool pixels from color voting
+        if prep is not None:
+            if prep.dL is not None and float(prep.dL[iy, ix]) < cfg.ink_pool_dark_dl:
+                continue
+            da_val = float(prep.smoothed_da[iy, ix]) if prep.smoothed_da is not None else (
+                float(prep.da[iy, ix]) if prep.da is not None else 0.0
+            )
+            db_val = float(prep.smoothed_db[iy, ix]) if prep.smoothed_db is not None else (
+                float(prep.db[iy, ix]) if prep.db is not None else 0.0
+            )
+            if prep.smoothed_da is not None and prep.smoothed_db is not None:
+                chroma_val = float(np.hypot(da_val, db_val))
+                if chroma_val < cfg.ink_pool_min_chroma:
+                    continue
+
+            if prep.color_signals:
+                # Require clear LAB opponent separation for each candidate color
+                sigs = []
+                for cn in color_names:
+                    s_val = float(prep.color_signals[cn][iy, ix]) if cn in prep.color_signals else 0.0
+                    if cn == "red" and not (da_val >= sep and da_val > -db_val * 0.35):
+                        s_val = 0.0
+                    elif cn == "green" and not (da_val <= -sep):
+                        s_val = 0.0
+                    elif cn == "blue" and not (db_val <= -sep and da_val < sep * 0.8):
+                        s_val = 0.0
+                    sigs.append(s_val)
+
+                w_pt = 1.0
+                sorted_sigs = sorted(sigs, reverse=True)
+                if (
+                    len(sorted_sigs) >= 2
+                    and sorted_sigs[0] > 1e-6
+                    and sorted_sigs[1] > 0.85 * sorted_sigs[0]
+                ):
+                    w_pt = 0.25
+                for cn, s_val in zip(color_names, sigs):
+                    votes[cn] += w_pt * s_val
+
+        y0, y1 = max(0, iy - 1), min(h, iy + 2)
+        x0, x1 = max(0, ix - 1), min(w, ix + 2)
+        for cn in color_names:
+            if np.any(color_masks[cn][y0:y1, x0:x1]):
+                mask_votes[cn] += 1.0
+
+    tot_sig = sum(votes.values())
+    use_votes = votes if tot_sig > 1e-6 else mask_votes
+    tot = sum(use_votes.values())
+    if tot <= 1e-6:
+        return default_fb, 0.0
+
+    ranked = sorted(color_names, key=lambda cn: use_votes[cn], reverse=True)
+    best_c = ranked[0]
+    best_v = use_votes[best_c]
+    second_v = use_votes[ranked[1]] if len(ranked) >= 2 else 0.0
+    if second_v > 1e-6 and best_v < float(cfg.color_vote_margin) * second_v:
+        return default_fb, float(best_v) / tot
+    return best_c, float(best_v) / tot
+
+
+def _detect_sharp_corners(
+    pts: np.ndarray,
+    is_closed: bool,
+    corner_angle_deg: float,
+    window_px: float,
+) -> List[int]:
+    """Return sorted indices of sharp corner vertices where turn angle >= corner_angle_deg."""
+    n = len(pts)
+    if n < 7:
+        return []
+
+    core = pts[:-1] if (is_closed and np.hypot(*(pts[-1] - pts[0])) < 2.0) else pts
+    m = len(core)
+    if m < 7:
+        return []
+
+    diffs = np.diff(core, axis=0)
+    seg_lens = np.hypot(diffs[:, 0], diffs[:, 1])
+    cum_s = np.concatenate([[0.0], np.cumsum(seg_lens)])
+    total_s = float(cum_s[-1])
+    if total_s < 2.5 * window_px:
+        return []
+
+    w_px = max(5.0, float(window_px))
+    turn_angles = np.zeros(m, dtype=np.float64)
+
+    for i in range(m):
+        if not is_closed and (cum_s[i] < w_px * 0.8 or total_s - cum_s[i] < w_px * 0.8):
+            continue
+
+        # Walk backward by w_px
+        j_prev = i
+        acc = 0.0
+        steps = 0
+        while acc < w_px and steps < m - 1:
+            nxt = (j_prev - 1) % m if is_closed else j_prev - 1
+            if nxt < 0:
+                break
+            acc += float(np.hypot(*(core[j_prev] - core[nxt])))
+            j_prev = nxt
+            steps += 1
+
+        # Walk forward by w_px
+        j_next = i
+        acc = 0.0
+        steps = 0
+        while acc < w_px and steps < m - 1:
+            nxt = (j_next + 1) % m if is_closed else j_next + 1
+            if nxt >= m:
+                break
+            acc += float(np.hypot(*(core[nxt] - core[j_next])))
+            j_next = nxt
+            steps += 1
+
+        v1 = core[j_prev] - core[i]
+        v2 = core[j_next] - core[i]
+        l1 = float(np.hypot(v1[0], v1[1]))
+        l2 = float(np.hypot(v2[0], v2[1]))
+        if l1 < 2.0 or l2 < 2.0:
+            continue
+        cos_a = float(np.clip(np.dot(v1, v2) / (l1 * l2), -1.0, 1.0))
+        interior_deg = float(np.degrees(np.arccos(cos_a)))
+        turn_angles[i] = 180.0 - interior_deg
+
+    # Non-maximum suppression within w_px
+    corners: List[int] = []
+    order = np.argsort(-turn_angles)
+    suppressed = np.zeros(m, dtype=bool)
+    for idx in order:
+        if turn_angles[idx] < corner_angle_deg:
+            break
+        if suppressed[idx]:
+            continue
+        corners.append(int(idx))
+        for k in range(m):
+            if is_closed:
+                ds = min(abs(cum_s[k] - cum_s[idx]), total_s - abs(cum_s[k] - cum_s[idx]))
+            else:
+                ds = abs(cum_s[k] - cum_s[idx])
+            if ds <= w_px * 1.1:
+                suppressed[k] = True
+
+    corners.sort()
+    return corners
+
+
+def _bridge_aligned_endpoints(
+    chains: List[Tuple[np.ndarray, bool]],
+    max_dist_px: float = 16.0,
+    min_cos_sim: float = 0.55,
+) -> List[Tuple[np.ndarray, bool]]:
+    """Bridge nearby same-color open-chain endpoints (degree == 1) when local directions align."""
+    work = [[pts.copy(), bool(is_cl)] for pts, is_cl in chains if len(pts) >= 2]
+
+    def _out_dir(pts_arr: np.ndarray, at_end: bool) -> np.ndarray:
+        k_step = min(len(pts_arr) - 1, 8)
+        if k_step <= 0:
+            return np.array([1.0, 0.0], dtype=np.float64)
+        v = (pts_arr[-1] - pts_arr[-1 - k_step]) if at_end else (pts_arr[0] - pts_arr[k_step])
+        nm = float(np.hypot(v[0], v[1]))
+        return v / nm if nm > 1e-6 else np.array([1.0, 0.0], dtype=np.float64)
+
+    changed = True
+    while changed:
+        changed = False
+        n_w = len(work)
+        best_pair = None
+        best_d = float(max_dist_px)
+        for i in range(n_w):
+            if work[i][1] or len(work[i][0]) < 2:  # type: ignore[arg-type]
+                continue
+            pts_a: np.ndarray = work[i][0]  # type: ignore[assignment]
+            for j in range(i + 1, n_w):
+                if work[j][1] or len(work[j][0]) < 2:  # type: ignore[arg-type]
+                    continue
+                pts_b: np.ndarray = work[j][0]  # type: ignore[assignment]
+                for end_a in (False, True):
+                    pa = pts_a[-1] if end_a else pts_a[0]
+                    ua = _out_dir(pts_a, end_a)
+                    for end_b in (False, True):
+                        pb = pts_b[-1] if end_b else pts_b[0]
+                        d_ab = float(np.hypot(*(pa - pb)))
+                        if d_ab <= best_d:
+                            ub = _out_dir(pts_b, end_b)
+                            if float(np.dot(ua, ub)) <= -float(min_cos_sim):
+                                best_d = d_ab
+                                best_pair = (i, j, end_a, end_b)
+        if best_pair is not None:
+            i, j, end_a, end_b = best_pair
+            pa_ord = work[i][0] if end_a else work[i][0][::-1]  # type: ignore[index]
+            pb_ord = work[j][0][::-1] if end_b else work[j][0]  # type: ignore[index]
+            work[i][0] = np.vstack([pa_ord, pb_ord])
+            work.pop(j)
+            changed = True
+
+    return [(pts, bool(is_cl)) for pts, is_cl in work]  # type: ignore[misc]
+
+
+def _split_and_classify_by_segment(
+    pts_c: np.ndarray,
+    is_cl: bool,
+    orig_color: str,
+    color_masks: Dict[str, np.ndarray],
+    prep: Optional[PreprocessOutput],
+    cfg: Config,
+    est_w_px: float,
+) -> List[Tuple[str, np.ndarray, bool]]:
+    """Split a chain at sharp corners first, classify color independently per segment,
+    and re-join adjacent segments only when they share the same color."""
+    corner_win = max(5.0, 1.5 * est_w_px)
+    c_idxs = _detect_sharp_corners(
+        pts_c,
+        is_closed=is_cl,
+        corner_angle_deg=cfg.corner_angle_deg,
+        window_px=corner_win,
+    )
+    if not c_idxs:
+        col, _ = _classify_chain_dominant_color(
+            pts_c, is_cl, color_masks, prep, cfg, est_w_px, fallback_color=orig_color
+        )
+        return [(col, pts_c, is_cl)]
+
+    segs: List[np.ndarray] = []
+    if is_cl:
+        core = pts_c[:-1] if np.hypot(*(pts_c[-1] - pts_c[0])) < 2.0 else pts_c
+        k_c = len(c_idxs)
+        if k_c == 1:
+            idx0 = c_idxs[0]
+            segs = [np.vstack([core[idx0:], core[: idx0 + 1]])]
+        else:
+            for s_i in range(k_c):
+                a = c_idxs[s_i]
+                b = c_idxs[(s_i + 1) % k_c]
+                if a < b:
+                    segs.append(core[a : b + 1])
+                else:
+                    segs.append(np.vstack([core[a:], core[: b + 1]]))
+    else:
+        splits = [0] + [c for c in c_idxs if 0 < c < len(pts_c) - 1] + [len(pts_c) - 1]
+        for s_i in range(len(splits) - 1):
+            a, b = splits[s_i], splits[s_i + 1]
+            if b - a >= 2:
+                segs.append(pts_c[a : b + 1])
+
+    if not segs:
+        col, _ = _classify_chain_dominant_color(
+            pts_c, is_cl, color_masks, prep, cfg, est_w_px, fallback_color=orig_color
+        )
+        return [(col, pts_c, is_cl)]
+
+    seg_colors: List[str] = []
+    for seg in segs:
+        col_s, _ = _classify_chain_dominant_color(
+            seg, False, color_masks, prep, cfg, est_w_px, fallback_color=orig_color
+        )
+        seg_colors.append(col_s)
+
+    if len(set(seg_colors)) == 1:
+        return [(seg_colors[0], pts_c, is_cl)]
+
+    out: List[Tuple[str, np.ndarray, bool]] = []
+    cur_col = seg_colors[0]
+    cur_pts = segs[0]
+    for idx_s in range(1, len(segs)):
+        if seg_colors[idx_s] == cur_col:
+            cur_pts = np.vstack([cur_pts[:-1], segs[idx_s]])
+        else:
+            out.append((cur_col, cur_pts, False))
+            cur_col = seg_colors[idx_s]
+            cur_pts = segs[idx_s]
+    out.append((cur_col, cur_pts, False))
+
+    if is_cl and len(out) >= 2 and out[0][0] == out[-1][0]:
+        merged_wrap = np.vstack([out[-1][1][:-1], out[0][1]])
+        out[0] = (out[0][0], merged_wrap, False)
+        out.pop()
+
+    return out
+
+
 def stage5_skeleton_and_grouping(
     thresh: ThresholdOutput, cfg: Config, prep: Optional[PreprocessOutput] = None
 ) -> SkeletonOutput:
-    """Stage 5: Skeletonize each color mask, build junction/endpoint graph, prune spurs,
-    merge through degree-2 nodes, close endpoint gaps, and snap T-junctions per color.
+    """Stage 5: Skeletonize unified ink mask, prune junction spurs parameterized by stroke width,
+    trace continuous chains, and assign one dominant color per stroke.
 
     Args:
         thresh: Output from Stage 4.
@@ -1209,6 +1567,14 @@ def stage5_skeleton_and_grouping(
             color_bgr_map[c_spec.name] = (229, 136, 30)
 
     if thresh.color_masks:
+        unified_mask = np.zeros((h_img, w_img), dtype=bool)
+        for c_mask in thresh.color_masks.values():
+            if np.any(c_mask):
+                unified_mask |= c_mask
+        est_w_px = _estimate_stroke_width_px(unified_mask, cfg, work_px_per_mm)
+        min_spur_len = max(3, int(round(cfg.spur_factor * est_w_px)))
+        eff_spur_px = max(spur_px, min_spur_len)
+
         for c_name, c_mask in thresh.color_masks.items():
             if not np.any(c_mask):
                 color_skeletons[c_name] = np.zeros_like(c_mask, dtype=bool)
@@ -1237,7 +1603,7 @@ def stage5_skeleton_and_grouping(
                     continue
                 sub_m = cc_lbl[by : by + bh, bx : bx + bw] == c_idx
                 keep_sk_c[by : by + bh, bx : bx + bw] |= sub_m
-                sub_chains = _trace_component_chains(sub_m, max_spur_px=spur_px)
+                sub_chains = _trace_component_chains(sub_m, max_spur_px=eff_spur_px)
                 for pts_loc, is_cl in sub_chains:
                     raw_c_chains.append(
                         (
@@ -1246,30 +1612,129 @@ def stage5_skeleton_and_grouping(
                         )
                     )
 
-            merged_c_chains = _close_gaps_and_snap_t_junctions(
+            raw_count = len(raw_c_chains)
+            bridged_c_chains = _bridge_aligned_endpoints(
                 raw_c_chains,
+                max_dist_px=float(cfg.endpoint_bridge_max_dist_px),
+                min_cos_sim=float(cfg.endpoint_bridge_cos_sim),
+            )
+            merged_c_chains = _close_gaps_and_snap_t_junctions(
+                bridged_c_chains,
                 min_gap_px=min(2.0, gap_px),
                 collinear_gap_px=max(20.0, gap_px * 8.0),
                 t_snap_px=t_snap_px,
             )
-            # Filter out tiny isolated noise chains (< 13.5 px arc length)
+            # Filter out tiny isolated noise speckles AFTER gap bridging
             final_c_chains: List[Tuple[np.ndarray, bool]] = []
             for pts_c, is_cl in merged_c_chains:
                 if len(pts_c) < 6:
                     continue
                 diffs_c = np.diff(pts_c, axis=0)
                 arc_c = float(np.sum(np.hypot(diffs_c[:, 0], diffs_c[:, 1])))
-                if arc_c < 13.5:
+                if arc_c < float(cfg.min_chain_length_px):
                     continue
                 final_c_chains.append((pts_c, is_cl))
+
+            print(
+                f"[Stage 5 Chains:{c_name}] endpoint_bridge_max_dist_px={cfg.endpoint_bridge_max_dist_px:.1f}, "
+                f"min_chain_length_px={cfg.min_chain_length_px:.1f}, "
+                f"raw={raw_count}, after_bridge={len(bridged_c_chains)}, final={len(final_c_chains)}"
+            )
 
             color_skeletons[c_name] = keep_sk_c
             color_chains[c_name] = final_c_chains
 
-            # Draw skeleton, junctions, and endpoints onto graph_vis
-            bgr_col = color_bgr_map.get(c_name, (200, 200, 200))
-            graph_vis[keep_sk_c] = bgr_col
-            u8_c = keep_sk_c.astype(np.uint8)
+        # Split polylines at sharp corners first, classify color independently per segment,
+        # and unify collinear cross-color segments.
+        all_items: List[List[object]] = []
+        for c_name, ch_list in color_chains.items():
+            for pts_c, is_cl in ch_list:
+                for seg_col, seg_pts, seg_cl in _split_and_classify_by_segment(
+                    pts_c, is_cl, c_name, thresh.color_masks, prep, cfg, est_w_px
+                ):
+                    if len(seg_pts) >= 6:
+                        all_items.append([seg_col, seg_pts, bool(seg_cl), True])
+
+        def _end_tangent(pts_arr: np.ndarray, at_end: bool) -> np.ndarray:
+            k_step = min(len(pts_arr) - 1, 10)
+            if k_step <= 0:
+                return np.array([1.0, 0.0], dtype=np.float64)
+            v = (pts_arr[-1] - pts_arr[-1 - k_step]) if at_end else (pts_arr[0] - pts_arr[k_step])
+            nm = float(np.hypot(v[0], v[1]))
+            return v / nm if nm > 1e-6 else np.array([1.0, 0.0], dtype=np.float64)
+
+        cross_gap = max(t_snap_px, gap_px * 3.5)
+        merged_cross = True
+        while merged_cross:
+            merged_cross = False
+            n_it = len(all_items)
+            for i in range(n_it):
+                if not all_items[i][3] or all_items[i][2]:
+                    continue
+                col_a, pts_a = str(all_items[i][0]), all_items[i][1]  # type: ignore[assignment]
+                for j in range(i + 1, n_it):
+                    if not all_items[j][3] or all_items[j][2]:
+                        continue
+                    col_b, pts_b = str(all_items[j][0]), all_items[j][1]  # type: ignore[assignment]
+                    if col_a == col_b:
+                        continue
+                    # Check all 4 endpoint pairs for collinear continuation
+                    best_cfg = None
+                    best_d = cross_gap
+                    for end_a in (False, True):
+                        pa = pts_a[-1] if end_a else pts_a[0]  # type: ignore[index]
+                        ua = _end_tangent(pts_a, end_a)  # type: ignore[arg-type]
+                        for end_b in (False, True):
+                            pb = pts_b[-1] if end_b else pts_b[0]  # type: ignore[index]
+                            d_ab = float(np.hypot(*(pa - pb)))
+                            if d_ab <= best_d:
+                                ub = _end_tangent(pts_b, end_b)  # type: ignore[arg-type]
+                                if float(np.dot(ua, ub)) <= -0.75:
+                                    best_d = d_ab
+                                    best_cfg = (end_a, end_b)
+                    if best_cfg is not None:
+                        end_a, end_b = best_cfg
+                        pa_ord = pts_a if end_a else pts_a[::-1]  # type: ignore[index]
+                        pb_ord = pts_b[::-1] if end_b else pts_b  # type: ignore[index]
+                        comb = np.vstack([pa_ord, pb_ord])
+                        dom_col, _ = _classify_chain_dominant_color(
+                            comb, False, thresh.color_masks, prep, cfg, est_w_px
+                        )
+                        all_items[i][0] = dom_col
+                        all_items[i][1] = comb
+                        all_items[j][3] = False
+                        merged_cross = True
+                        break
+                if merged_cross:
+                    break
+
+        for cn in color_chains:
+            color_chains[cn] = []
+            color_skeletons[cn] = np.zeros((h_img, w_img), dtype=bool)
+        for item in all_items:
+            if not item[3]:
+                continue
+            cn = str(item[0])
+            pts_c = item[1]  # type: ignore[assignment]
+            is_cl = bool(item[2])
+            color_chains.setdefault(cn, []).append((pts_c, is_cl))
+            sk_target = color_skeletons.setdefault(cn, np.zeros((h_img, w_img), dtype=bool))
+            xs_i = np.clip(np.round(pts_c[:, 0]).astype(int), 0, w_img - 1)  # type: ignore[index]
+            ys_i = np.clip(np.round(pts_c[:, 1]).astype(int), 0, h_img - 1)  # type: ignore[index]
+            sk_target[ys_i, xs_i] = True
+
+            bgr_col = color_bgr_map.get(cn, (200, 200, 200))
+            graph_vis[ys_i, xs_i] = bgr_col
+            if not is_cl and len(pts_c) >= 2:  # type: ignore[arg-type]
+                p0 = (int(round(float(pts_c[0, 0]))), int(round(float(pts_c[0, 1]))))  # type: ignore[index]
+                p1 = (int(round(float(pts_c[-1, 0]))), int(round(float(pts_c[-1, 1]))))  # type: ignore[index]
+                cv2.circle(graph_vis, p0, 3, (255, 255, 0), -1)
+                cv2.circle(graph_vis, p1, 3, (255, 255, 0), -1)
+
+        for cn, sk_c in color_skeletons.items():
+            if not np.any(sk_c):
+                continue
+            u8_c = sk_c.astype(np.uint8)
             deg_c = (
                 cv2.filter2D(u8_c, cv2.CV_8U, k_nb, borderType=cv2.BORDER_CONSTANT)
                 * u8_c
@@ -1277,12 +1742,6 @@ def stage5_skeleton_and_grouping(
             j_ys, j_xs = np.nonzero(deg_c >= 3)
             for jy, jx in zip(j_ys, j_xs):
                 cv2.circle(graph_vis, (int(jx), int(jy)), 3, (0, 255, 255), -1)
-            for pts_c, is_cl in final_c_chains:
-                if not is_cl and len(pts_c) >= 2:
-                    p0 = (int(round(float(pts_c[0, 0]))), int(round(float(pts_c[0, 1]))))
-                    p1 = (int(round(float(pts_c[-1, 0]))), int(round(float(pts_c[-1, 1]))))
-                    cv2.circle(graph_vis, p0, 3, (255, 255, 0), -1)
-                    cv2.circle(graph_vis, p1, 3, (255, 255, 0), -1)
 
         # Prune spurious green edge chains that lie along red strokes or corrugation texture (chroma < 5.0)
         if "green" in color_chains:
@@ -1497,13 +1956,27 @@ def _order_simple_chain(chain_mask: np.ndarray) -> np.ndarray:
     return np.column_stack([xs[path], ys[path]]).astype(np.float64)
 
 
+def _estimate_stroke_width_px(
+    mask_bool: np.ndarray, cfg: Config, work_px_per_mm: float
+) -> float:
+    """Estimate stroke width in working pixels from config override or Euclidean distance transform."""
+    if cfg.stroke_width_px is not None:
+        return max(1.0, float(cfg.stroke_width_px))
+    if np.any(mask_bool):
+        dist = cv2.distanceTransform(mask_bool.astype(np.uint8), cv2.DIST_L2, 5)
+        fg_dists = dist[dist > 0]
+        if fg_dists.size > 0:
+            return float(np.clip(2.0 * float(np.median(fg_dists)), 2.0, 20.0))
+    return max(2.0, 1.6 * float(work_px_per_mm))
+
+
 def _prune_junction_hairs(skel_bool: np.ndarray, max_hair_len: int = 12) -> np.ndarray:
     """Remove short dead-end side hairs (<= max_hair_len px) attached to degree>=3 junctions
     without eroding genuine open stroke endpoints or crossing ticks."""
     out = _remove_skeleton_pimples(skel_bool)
     h, w = out.shape
     k_nb = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)
-    for _ in range(2):
+    for _ in range(5):
         u8 = out.astype(np.uint8)
         deg = cv2.filter2D(u8, cv2.CV_8U, k_nb, borderType=cv2.BORDER_CONSTANT) * u8
         if int(np.max(deg)) < 3:
@@ -1677,7 +2150,7 @@ def _trace_component_chains(
 
     # Case 2: Multi-loop graph (large_holes >= 2) or open/branched structure (large_holes == 0)
     # Remove short side hairs attached to junctions without shortening genuine open endpoints/ticks.
-    hair_len = 6 if n_pts >= 180 else max(3, min(4, max_spur_px))
+    hair_len = max(3, int(max_spur_px))
     work_mask = _prune_junction_hairs(_remove_skeleton_pimples(base_mask), max_hair_len=hair_len)
 
     if not np.any(work_mask):
@@ -2127,10 +2600,161 @@ def _close_gaps_and_snap_t_junctions(
     return [(pts, bool(is_cl)) for pts, is_cl in work]  # type: ignore[misc]
 
 
+def _smooth_chain_corner_aware(
+    pts: np.ndarray,
+    is_closed: bool,
+    sigma: float,
+    corner_indices: List[int],
+) -> np.ndarray:
+    """Smooth a 2D chain with Gaussian filtering while keeping sharp corners pinned."""
+    if not corner_indices or len(pts) < 7 or sigma <= 1e-3:
+        return _smooth_chain_gaussian(pts, is_closed=is_closed, sigma=sigma)
+
+    if is_closed:
+        core = pts[:-1] if np.hypot(*(pts[-1] - pts[0])) < 2.0 else pts
+        m = len(core)
+        if m < 7:
+            return pts.copy()
+        out = core.copy()
+        k_corners = sorted([c for c in corner_indices if 0 <= c < m])
+        if not k_corners:
+            return _smooth_chain_gaussian(pts, is_closed=True, sigma=sigma)
+        for idx_c in range(len(k_corners)):
+            a = k_corners[idx_c]
+            b = k_corners[(idx_c + 1) % len(k_corners)]
+            if a < b:
+                seg = core[a : b + 1]
+                if len(seg) >= 5:
+                    sm_seg = _smooth_chain_gaussian(seg, is_closed=False, sigma=sigma)
+                    out[a : b + 1] = sm_seg
+            else:
+                seg = np.vstack([core[a:], core[: b + 1]])
+                if len(seg) >= 5:
+                    sm_seg = _smooth_chain_gaussian(seg, is_closed=False, sigma=sigma)
+                    n_tail = m - a
+                    out[a:] = sm_seg[:n_tail]
+                    out[: b + 1] = sm_seg[n_tail:]
+        return np.vstack([out, out[0:1]])
+
+    out = pts.copy()
+    splits = [0] + [c for c in corner_indices if 0 < c < len(pts) - 1] + [len(pts) - 1]
+    for s_i in range(len(splits) - 1):
+        a, b = splits[s_i], splits[s_i + 1]
+        if b - a >= 4:
+            out[a : b + 1] = _smooth_chain_gaussian(
+                pts[a : b + 1], is_closed=False, sigma=sigma
+            )
+    return out
+
+
+def _fit_line_2d_dir(pts_seg: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Fit a 2D line (point, unit_direction) to a set of points via SVD."""
+    mean_p = np.mean(pts_seg, axis=0)
+    centered = pts_seg - mean_p
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    u = vt[0]
+    norm = float(np.hypot(u[0], u[1]))
+    if norm > 1e-9:
+        u = u / norm
+    else:
+        u = np.array([1.0, 0.0], dtype=np.float64)
+    return mean_p, u
+
+
+def _refine_polyline_corners_by_intersection(
+    simp: np.ndarray,
+    pts_raw: np.ndarray,
+    closed: bool,
+    snap_tol_px: float,
+    corner_angle_deg: float,
+    margin_px: float = 4.0,
+) -> np.ndarray:
+    """Refine sharp corner vertices by computing exact 2D line-line intersections of adjacent segments."""
+    m = len(simp)
+    if m < 3 or len(pts_raw) < 10:
+        return simp
+
+    is_cl_loop = closed and m >= 4 and np.hypot(*(simp[-1] - simp[0])) < 2.0
+    verts = simp[:-1].copy() if is_cl_loop else simp.copy()
+    nv = len(verts)
+    if nv < 3:
+        return simp
+
+    # Map each simplified vertex to its closest index in pts_raw
+    v_raw_idx = [
+        int(np.argmin(np.hypot(pts_raw[:, 0] - v[0], pts_raw[:, 1] - v[1])))
+        for v in verts
+    ]
+
+    refined = verts.copy()
+    start_i = 0 if is_cl_loop else 1
+    end_i = nv if is_cl_loop else nv - 1
+
+    for i in range(start_i, end_i):
+        p_prev = verts[(i - 1) % nv]
+        p_curr = verts[i]
+        p_next = verts[(i + 1) % nv]
+
+        v1 = p_prev - p_curr
+        v2 = p_next - p_curr
+        l1 = float(np.hypot(v1[0], v1[1]))
+        l2 = float(np.hypot(v2[0], v2[1]))
+        if l1 < 8.0 or l2 < 8.0:
+            continue
+
+        cos_a = float(np.clip(np.dot(v1, v2) / (l1 * l2), -1.0, 1.0))
+        turn_deg = 180.0 - float(np.degrees(np.arccos(cos_a)))
+        if turn_deg < corner_angle_deg:
+            continue
+
+        # Gather raw points on segment (i-1 -> i) and (i -> i+1), excluding corner pooling zone
+        idx_a = v_raw_idx[(i - 1) % nv]
+        idx_b = v_raw_idx[i]
+        idx_c = v_raw_idx[(i + 1) % nv]
+
+        def _slice_seg(ia: int, ib: int) -> np.ndarray:
+            if ia <= ib:
+                return pts_raw[ia : ib + 1]
+            if is_cl_loop:
+                return np.vstack([pts_raw[ia:], pts_raw[: ib + 1]])
+            return pts_raw[ib : ia + 1][::-1]
+
+        seg1 = _slice_seg(idx_a, idx_b)
+        seg2 = _slice_seg(idx_b, idx_c)
+        trim_n = max(2, int(round(margin_px)))
+        if len(seg1) <= trim_n + 3 or len(seg2) <= trim_n + 3:
+            continue
+        seg1_core = seg1[:-trim_n]
+        seg2_core = seg2[trim_n:]
+
+        # Verify both segments are reasonably straight before intersecting
+        m1, u1 = _fit_line_2d_dir(seg1_core)
+        m2, u2 = _fit_line_2d_dir(seg2_core)
+        n1 = np.array([-u1[1], u1[0]])
+        n2 = np.array([-u2[1], u2[0]])
+        res1 = float(np.mean(np.abs((seg1_core - m1) @ n1)))
+        res2 = float(np.mean(np.abs((seg2_core - m2) @ n2)))
+        if res1 > 1.8 or res2 > 1.8:
+            continue
+
+        denom = u1[0] * u2[1] - u1[1] * u2[0]
+        if abs(denom) < 0.25:
+            continue
+        diff_m = m2 - m1
+        t = (diff_m[0] * u2[1] - diff_m[1] * u2[0]) / denom
+        inter = m1 + t * u1
+        if float(np.hypot(*(inter - p_curr))) <= snap_tol_px:
+            refined[i] = inter
+
+    if is_cl_loop:
+        return np.vstack([refined, refined[0:1]])
+    return refined
+
+
 def stage6_vectorize(
     skel_out: SkeletonOutput, prep: PreprocessOutput, cfg: Config
 ) -> VectorizeOutput:
-    """Stage 6: Trace per-color skeleton chains, smooth, simplify with RDP, and scale to bed.
+    """Stage 6: Trace per-color skeleton chains, preserve sharp corners, simplify with RDP, and scale to bed.
 
     Args:
         skel_out: Output from Stage 5.
@@ -2146,6 +2770,8 @@ def stage6_vectorize(
     )
     color_hex_map = {c.name: c.hex_color for c in cfg.colors}
     curves: List[TracedCurve] = []
+    est_w_px = float(cfg.stroke_width_px) if cfg.stroke_width_px is not None else max(2.5, 1.6 * prep.px_per_mm)
+    corner_win_px = max(5.0, 1.5 * est_w_px)
 
     has_color_chains = (
         any(len(chains) > 0 for chains in skel_out.color_chains.values())
@@ -2158,8 +2784,17 @@ def stage6_vectorize(
             for pts_raw, is_closed in chain_list:
                 if len(pts_raw) < 6:
                     continue
-                pts_work = _smooth_chain_gaussian(
-                    pts_raw, is_closed=is_closed, sigma=cfg.chain_smooth_sigma_px
+                corner_idxs = _detect_sharp_corners(
+                    pts_raw,
+                    is_closed=is_closed,
+                    corner_angle_deg=cfg.corner_angle_deg,
+                    window_px=corner_win_px,
+                )
+                pts_work = _smooth_chain_corner_aware(
+                    pts_raw,
+                    is_closed=is_closed,
+                    sigma=cfg.chain_smooth_sigma_px,
+                    corner_indices=corner_idxs,
                 )
                 diffs_work = np.diff(pts_work, axis=0)
                 len_work = float(np.sum(np.hypot(diffs_work[:, 0], diffs_work[:, 1])))
@@ -2169,6 +2804,15 @@ def stage6_vectorize(
                 simp_work = rdp_simplify(
                     pts_work, cfg.rdp_epsilon if is_closed else 1.2, closed=is_closed
                 )
+                if corner_idxs:
+                    simp_work = _refine_polyline_corners_by_intersection(
+                        simp_work,
+                        pts_raw,
+                        closed=is_closed,
+                        snap_tol_px=cfg.snap_tolerance_px,
+                        corner_angle_deg=cfg.corner_angle_deg,
+                        margin_px=max(3.0, est_w_px),
+                    )
                 pts_orig = pts_work * scale_vec + offset_vec
                 simp_orig = simp_work * scale_vec + offset_vec
                 diffs_orig = np.diff(pts_orig, axis=0)

@@ -914,19 +914,23 @@ def _classify_ink_color(
         b_val = float(b_chan[py, px])
         da = 0.5 * (a_val - float(bg_a_map[py, px])) + 0.5 * (a_val - med_a)
         db = 0.5 * (b_val - float(bg_b_map[py, px])) + 0.5 * (b_val - med_b)
-        if da >= 5.0 and da >= abs(db) * 0.40:
+        chroma = float(np.hypot(da, db))
+        if chroma < 3.5:
+            votes["black"] += 1
+            continue
+        if da >= 4.5 and da > -db * 0.35 and da >= abs(db) * 0.40:
             votes["red"] += 1
-        elif da <= -4.5 and (db >= -5.5 or da <= db * 0.65):
+        elif da <= -3.5 and (db >= -5.5 or da <= db * 0.65):
             votes["green"] += 1
-        elif db <= -8.0:
+        elif db <= -6.0 and da < 3.0:
             votes["blue"] += 1
         else:
             votes["black"] += 1
 
-    total = max(1, len(sample_pts))
-    if votes["red"] / total >= 0.25 and votes["red"] >= votes["green"]:
+    valid_total = max(1, votes["red"] + votes["green"] + votes["blue"])
+    if votes["red"] / valid_total >= 0.40 and votes["red"] > max(votes["green"], votes["blue"]):
         return "score", "#ef4444"
-    if votes["green"] / total >= 0.25 and votes["green"] > votes["red"]:
+    if votes["green"] / valid_total >= 0.35 and votes["green"] >= votes["blue"]:
         return "crease", "#22c55e"
     return "thru_cut", "#3b82f6"
 
@@ -1361,8 +1365,15 @@ def stage7_and_8_fit_and_validate(
                 # 4. Zigzag (repeated sharp direction reversals) -> RDP with corner-preserving epsilon, emitted as ONE polyline
                 is_zigzag, zz_poly, zz_err = _detect_zigzag_polyline(pts, avg_scale)
                 if is_zigzag:
-                    bez_params, bez_err, bez_inlier, bez_pts = _fit_schneider_bezier_path(
-                        pts, max_err=fit_tol_orig * 1.15
+                    zz_min_ang = _min_interior_angle_deg(zz_poly, closed=False, min_seg=4.0 * avg_scale)
+                    allow_wave_bezier = (
+                        tc.length_orig >= 250.0 * avg_scale
+                        or zz_min_ang > (180.0 - float(cfg.corner_angle_deg))
+                    )
+                    bez_params, bez_err, bez_inlier, bez_pts = (
+                        _fit_schneider_bezier_path(pts, max_err=fit_tol_orig * 1.15)
+                        if allow_wave_bezier
+                        else ({}, 1e9, 0.0, pts)
                     )
                     if bool(bez_params) and bez_err < zz_err and bez_err <= fit_tol_orig * 1.35:
                         chosen_type = "bezier"
@@ -1536,7 +1547,7 @@ def stage7_and_8_fit_and_validate(
                     {"idx": i, "p0": p0, "p1": p1, "u": u, "len": length, "color": c.color}
                 )
 
-    max_snap_px = 10.0
+    max_snap_px = float(cfg.snap_tolerance_px) * max(1.0, avg_scale)
 
     def _update_endpoint(curve_idx: int, ep_idx: int, new_pt: np.ndarray) -> None:
         fc = results[curve_idx]
@@ -1597,6 +1608,26 @@ def stage7_and_8_fit_and_validate(
 
         cluster_pts = np.array([line_eps[ci]["pt"] for ci in cluster])
         best_vertex = np.mean(cluster_pts, axis=0)
+        if len(cluster) == 2:
+            ec_a, ec_b = line_eps[cluster[0]], line_eps[cluster[1]]
+            fc_a = results[lines_info[ec_a["line_idx"]]["idx"]]
+            fc_b = results[lines_info[ec_b["line_idx"]]["idx"]]
+            if fc_a.curve_type in ("line", "polyline") and fc_b.curve_type in ("line", "polyline") and len(fc_a.points) >= 2 and len(fc_b.points) >= 2:
+                pa1 = np.array(fc_a.points[1] if ec_a["ep"] == 0 else fc_a.points[-2], dtype=np.float64)
+                pa2 = np.array(fc_a.points[0] if ec_a["ep"] == 0 else fc_a.points[-1], dtype=np.float64)
+                pb1 = np.array(fc_b.points[1] if ec_b["ep"] == 0 else fc_b.points[-2], dtype=np.float64)
+                pb2 = np.array(fc_b.points[0] if ec_b["ep"] == 0 else fc_b.points[-1], dtype=np.float64)
+                va = pa2 - pa1
+                vb = pb2 - pb1
+                la = float(np.hypot(va[0], va[1]))
+                lb = float(np.hypot(vb[0], vb[1]))
+                if la > 1e-3 and lb > 1e-3:
+                    cross_sin = abs(float(va[0] * vb[1] - va[1] * vb[0])) / (la * lb)
+                    min_sin = float(np.sin(np.radians(min(cfg.corner_angle_deg, 20.0))))
+                    if cross_sin >= min_sin:
+                        v_int = line_intersect(pa1, pa2, pb1, pb2)
+                        if max(float(np.hypot(*(v_int - pa2))), float(np.hypot(*(v_int - pb2)))) <= max_snap_px * 1.5:
+                            best_vertex = v_int
 
         for ci in cluster:
             ec = line_eps[ci]

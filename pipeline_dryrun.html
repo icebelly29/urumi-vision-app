@@ -412,8 +412,6 @@
     <script src="pipeline/CardboardDetector.js"></script>
     <script src="pipeline/ContourRoiDetector.js"></script>
     <script src="pipeline/ColorSpectrumAnalyzer.js"></script>
-    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"></script>
-
     <script>
         const log = document.getElementById('log');
         function addLog(msg, cls = 'info') {
@@ -461,13 +459,64 @@
             setStep(stepId, true);
         }
 
-        function onOpenCvReady() {
+        let cvReadyDone = false;
+        let cvFallbackTried = false;
+
+        function markReady() {
+            if (cvReadyDone) return;
+            cvReadyDone = true;
             addLog('OpenCV ready.', 'ok');
             document.getElementById('opencvStatus').textContent = 'OpenCV ready';
             document.getElementById('opencvStatus').classList.add('ready');
             document.getElementById('fileInput').disabled = false;
             document.getElementById('btnRun').disabled = false;
         }
+
+        function onOpenCvReady() {
+            if (cvReadyDone || typeof cv === 'undefined') return;
+            if (cv.Mat) {
+                markReady();
+            } else if (typeof cv.then === 'function') {
+                cv.then((resolvedCv) => {
+                    window.cv = resolvedCv;
+                    markReady();
+                });
+            } else {
+                const prevInit = cv['onRuntimeInitialized'];
+                cv['onRuntimeInitialized'] = () => {
+                    if (typeof prevInit === 'function') prevInit();
+                    markReady();
+                };
+                const poll = setInterval(() => {
+                    if (cvReadyDone) {
+                        clearInterval(poll);
+                    } else if (typeof cv !== 'undefined' && cv.Mat) {
+                        clearInterval(poll);
+                        markReady();
+                    }
+                }, 100);
+            }
+        }
+
+        function onOpenCvError() {
+            if (!cvFallbackTried) {
+                cvFallbackTried = true;
+                addLog('Primary OpenCV CDN failed. Trying jsDelivr fallback...', 'warn');
+                const fallback = document.createElement('script');
+                fallback.async = true;
+                fallback.src = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.9.0-release.3/dist/opencv.js';
+                fallback.onload = onOpenCvReady;
+                fallback.onerror = () => {
+                    addLog('Failed to load OpenCV.js from all CDNs.', 'err');
+                    document.getElementById('opencvStatus').textContent = 'OpenCV failed';
+                };
+                document.body.appendChild(fallback);
+            }
+        }
+    </script>
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()" onerror="onOpenCvError()"></script>
+
+    <script>
 
         let loadedImg = null;
 

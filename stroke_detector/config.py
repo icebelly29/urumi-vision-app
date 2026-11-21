@@ -77,7 +77,7 @@ class Config:
     min_raw_strokeness: float = 0.22  # Reject pure background noise floors
 
     # Stage 4: Hysteresis threshold & Speck rejection
-    k_low_sigma: float = 4.0   # Hysteresis low threshold = m + k_low_sigma * sigma
+    k_low_sigma: float = 3.2   # Hysteresis low threshold = m + k_low_sigma * sigma (lowered for faint pencil/marker strokes)
     k_high_sigma: float = 8.0  # Hysteresis high threshold = m + k_high_sigma * sigma
     min_component_len_mm: float = 6.0       # Criteria (a): long stroke length threshold in mm
     min_short_stroke_len_mm: float = 2.5    # Criteria (b): short stroke length threshold in mm
@@ -87,18 +87,29 @@ class Config:
     flute_reject_angle_deg: float = 15.0    # Angle tolerance to dominant flute direction in deg
     flute_reject_max_width_ratio: float = 0.70  # Width / stroke_width threshold for flute rejection
     hysteresis_high_pct: float = 97.0
-    hysteresis_low_pct: float = 90.0
+    hysteresis_low_pct: float = 86.0
     min_absolute_high: float = 0.20
-    color_hyst_low: float = 0.14
-    color_hyst_high: float = 0.26
+    color_hyst_low: float = 0.06
+    color_hyst_high: float = 0.24
     min_color_component_area_px: int = 40
     min_color_component_len_mm: float = 3.0
     morph_close_size: int = 3
+    color_morph_close_size: int = 5      # Elliptical closing kernel size for per-color masks before speck rejection
+    roi_border_margin_px: int = 18       # Border margin (px) zeroed out in zoomed ROI masks before skeletonization
 
     # Stage 5: Skeleton and perceptual grouping
+    stroke_width_px: Optional[float] = None  # Manual override for stroke width in working px (None = auto-estimate)
+    spur_factor: float = 2.0                 # Spur prune threshold = spur_factor * stroke_width_px
     spur_prune_iters: int = 15
     spur_prune_mm: float = 1.5           # Spurs <= 1.5 mm pruned iteratively
+    ink_pool_dark_dl: float = -40.0      # Exclude dark ink pools (dL < threshold) from stroke color voting
+    ink_pool_min_chroma: float = 3.5     # Exclude low-saturation ink pools from stroke color voting
+    color_min_opponent_sep: float = 3.5  # Min LAB opponent separation (da for red/green, -db for blue)
+    color_vote_margin: float = 1.25      # Min ratio between winning and runner-up color votes
     endpoint_gap_mm: float = 1.0         # Direct collinear gap close distance in mm
+    endpoint_bridge_max_dist_px: float = 14.0  # Max distance (px) to bridge aligned same-color endpoints
+    endpoint_bridge_cos_sim: float = 0.72  # Min cosine alignment for same-color endpoint bridging
+    min_chain_length_px: float = 13.5      # Min arc length (px) kept after gap bridging
     geodesic_gap_mm: float = 4.0         # Minimal-cost path gap close distance in mm
     cross_color_gap_margin_mm: float = 1.5  # Cross-color gap <= other_width + 1.5 mm
     t_junction_snap_mm: float = 2.5
@@ -111,8 +122,10 @@ class Config:
     filter_compact_blobs: bool = True
     min_elongation_ratio: float = 1.5
 
-    # Stage 6: Vectorize
+    # Stage 6: Vectorize & Corner Preservation
     rdp_epsilon: float = 2.5
+    corner_angle_deg: float = 35.0       # Minimum turn angle (deg) to preserve as a sharp corner
+    snap_tolerance_px: float = 10.0      # Max pixel tolerance for line-line intersection corner snapping
 
     # Stage 7: Shape model selection
     ransac_iterations: int = 1500

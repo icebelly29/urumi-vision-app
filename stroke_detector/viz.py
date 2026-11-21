@@ -250,7 +250,7 @@ def save_stage_visualizations(
             out_path / "04_threshold.png",
             s_map,
             color_comp_rgb,
-            f"Strokeness (low={artifacts.cfg.color_hyst_low:.2f}, high={artifacts.cfg.color_hyst_high:.2f})",
+            f"Strokeness (low={artifacts.cfg.color_hyst_low:.2f}, high={artifacts.cfg.color_hyst_high:.2f}, close={artifacts.cfg.color_morph_close_size}x{artifacts.cfg.color_morph_close_size})",
             "Per-Color Hysteresis Masks (Red / Green / Blue)",
             "Stage 04: Per-Color Hysteresis & Overlap Assignment",
             cmap_left="magma",
@@ -279,13 +279,14 @@ def save_stage_visualizations(
         if artifacts.skel.graph_nodes_vis is not None
         else final_skel.astype(np.uint8) * 255
     )
+    total_skel_chains = sum(len(v) for v in artifacts.skel.color_chains.values())
     saved_files.append(
         _save_side_by_side(
             out_path / "05_skeleton.png",
             color_comp_rgb,
             graph_rgb,
             "Per-Color Masks",
-            "Topological Graph (Junctions=Yellow, Endpoints=Cyan)",
+            f"Topological Graph ({total_skel_chains} chains, bridge={artifacts.cfg.endpoint_bridge_max_dist_px:.0f}px)",
             "Stage 05: Per-Color Skeletonization & Topological Graph",
         )
     )
