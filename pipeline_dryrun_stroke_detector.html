@@ -783,7 +783,8 @@
             }
         }
     </script>
-    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()" onerror="onOpenCvError()"></script>
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js" onload="onOpenCvReady()"
+        onerror="onOpenCvError()"></script>
 
     <script>
 
@@ -1054,8 +1055,9 @@
                 // Match Python sobel_norm = 0.25 for ksize=3 2nd derivative
                 const s2 = s * s * 0.25;
                 const hx = dxx.data32F, hy = dyy.data32F, hxy = dxy.data32F;
+                const flatD = flatMat.data32F;
                 for (let i = 0; i < hx.length; i++) {
-                    if (ignoreMaskU8[i] > 0) continue;
+                    if (ignoreMaskU8[i] > 0 || flatD[i] >= -1.2) continue;
                     const a = hx[i] * s2, b = hy[i] * s2, c = hxy[i] * s2;
                     const tr = a + b;
                     const det = Math.hypot(a - b, 2 * c);
@@ -1094,7 +1096,7 @@
             }
 
             const normU8 = new Uint8Array(rows * cols);
-            const isPureTexture = maxVal < 0.22 || (snr95 < 3.6 && snr80 < 22.0 && snr70 < 32.0);
+            const isPureTexture = maxVal < 0.22 || (maxVal < 8.0 && snr95 < 3.6 && snr80 < 22.0 && snr70 < 32.0);
             if (!isPureTexture) {
                 const normDenom = Math.max(1e-6, Math.max(p995, maxVal * 0.72));
                 const flatData = flatMat.data32F;
@@ -1318,8 +1320,23 @@
             }
 
             // Guard sharp-cornered closed polygons (triangles, squares, pentagons) against circle/ellipse smoothing
-            const minCornerDeg = minInteriorAngleDeg(simp, isClosed, 5.5);
-            const isSharpPolygon = isClosed && simp.length >= 3 && simp.length <= 8 && minCornerDeg <= 126.0;
+            const closedPolySimp = (isClosed || (endGap <= 28.0 && n >= 40)) ? rdpSimplify(dense, 4.5, true) : simp;
+            const minCornerDeg = minInteriorAngleDeg(closedPolySimp, true, 8.0);
+            const isSharpPolygon = (isClosed || (endGap <= 28.0 && n >= 40)) && closedPolySimp.length >= 4 && closedPolySimp.length <= 7 && minCornerDeg <= 122.0;
+            if (isSharpPolygon) {
+                const firstP = closedPolySimp[0], lastP = closedPolySimp[closedPolySimp.length - 1];
+                if (Math.hypot(firstP[0] - lastP[0], firstP[1] - lastP[1]) > 1.0) {
+                    closedPolySimp.push([firstP[0], firstP[1]]);
+                }
+                return {
+                    type: 'freehand',
+                    params: { vertices: closedPolySimp.length },
+                    fitError: 1.0,
+                    inlierRatio: 0.95,
+                    coverage: 360,
+                    workPoints: closedPolySimp
+                };
+            }
 
             if (!isSharpPolygon && (isClosed || endGap < 25) && n >= 16 && simp.length >= 6) {
                 let sux = 0, suy = 0, sux2 = 0, suy2 = 0, suxy = 0, suz = 0, suxz = 0, suyz = 0;
@@ -1433,11 +1450,34 @@
             };
         }
 
-        // Remove 1-px degree-2 staircase/pimple pixels whose two neighbors are already 8-adjacent (including 2-px end-caps)
+        // Two-pass directional L-corner removal to convert 4-connected Zhang-Suen staircases into 8-connected 1px curves
+        function eliminateStaircases(arr, w, h) {
+            for (let pass = 0; pass < 2; pass++) {
+                const toZero = [];
+                for (let y = 1; y < h - 1; y++) {
+                    for (let x = 1; x < w - 1; x++) {
+                        const idx = y * w + x;
+                        if (!arr[idx]) continue;
+                        const N = arr[idx - w], S = arr[idx + w], E = arr[idx + 1], W = arr[idx - 1];
+                        const NW = arr[idx - w - 1], NE = arr[idx - w + 1], SE = arr[idx + w + 1], SW = arr[idx + w - 1];
+                        if (pass === 0) {
+                            if ((N && E && !S && !W && !SW) || (N && W && !S && !E && !SE)) toZero.push(idx);
+                        } else {
+                            if ((S && E && !N && !W && !NW) || (S && W && !N && !E && !NE)) toZero.push(idx);
+                        }
+                    }
+                }
+                for (let idx of toZero) arr[idx] = 0;
+            }
+        }
+
+        // Remove 1-px degree-2/degree-3 staircase and apex-triangle pimple pixels whose neighbors are already 8-connected
         function removeSkeletonPimples(arr, w, h) {
+            eliminateStaircases(arr, w, h);
             const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+            const adj = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1])) <= 1;
             let anyChanged = false;
-            for (let pass = 0; pass < 3; pass++) {
+            for (let pass = 0; pass < 4; pass++) {
                 let changed = false;
                 for (let y = 0; y < h; y++) {
                     for (let x = 0; x < w; x++) {
@@ -1450,8 +1490,14 @@
                             }
                         }
                         if (nbs.length === 2) {
-                            const [x1, y1] = nbs[0], [x2, y2] = nbs[1];
-                            if (Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2)) <= 1) {
+                            if (adj(nbs[0], nbs[1])) {
+                                arr[y * w + x] = 0;
+                                changed = true;
+                                anyChanged = true;
+                            }
+                        } else if (nbs.length === 3) {
+                            const ab = adj(nbs[0], nbs[1]), bc = adj(nbs[1], nbs[2]), ac = adj(nbs[0], nbs[2]);
+                            if ((ab && bc) || (ab && ac) || (ac && bc)) {
                                 arr[y * w + x] = 0;
                                 changed = true;
                                 anyChanged = true;
@@ -1460,6 +1506,7 @@
                     }
                 }
                 if (!changed) break;
+                eliminateStaircases(arr, w, h);
             }
             return anyChanged;
         }
@@ -1491,7 +1538,7 @@
         function pruneJunctionHairs(arr, w, h, maxHairLen = 12) {
             const dirs = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
             removeSkeletonPimples(arr, w, h);
-            for (let pass = 0; pass < 5; pass++) {
+            for (let pass = 0; pass < 6; pass++) {
                 const deg = new Uint8Array(w * h);
                 let maxDeg = 0;
                 const endpoints = [];
@@ -1514,7 +1561,7 @@
                     if (!arr[sy * w + sx]) continue;
                     const path = [sy * w + sx];
                     let cx = sx, cy = sy, px = -1, py = -1;
-                    let hitJunc = false;
+                    let hitJunc = false, jx = -1, jy = -1;
                     for (let step = 0; step < maxHairLen; step++) {
                         let nxt = null;
                         for (let d of dirs) {
@@ -1528,18 +1575,42 @@
                         const [nx, ny] = nxt;
                         if (deg[ny * w + nx] >= 3) {
                             hitJunc = true;
+                            jx = nx;
+                            jy = ny;
                             break;
                         }
                         path.push(ny * w + nx);
                         px = cx; py = cy; cx = nx; cy = ny;
                     }
                     if (hitJunc && path.length <= maxHairLen) {
+                        // Protect half-ticks (>= 5px) of 4-way '+' crossings that continue straight across the junction
+                        if (path.length >= 5) {
+                            const vx = jx - sx, vy = jy - sy;
+                            const len = Math.hypot(vx, vy);
+                            if (len >= 4.0) {
+                                const ux = vx / len, uy = vy / len;
+                                const nx = -uy, ny = ux;
+                                let hasOpposite = false;
+                                for (let s = 4; s <= 7; s++) {
+                                    for (let lat = -1; lat <= 1; lat++) {
+                                        const tx = Math.round(jx + ux * s + nx * lat);
+                                        const ty = Math.round(jy + uy * s + ny * lat);
+                                        if (tx >= 0 && tx < w && ty >= 0 && ty < h && arr[ty * w + tx]) {
+                                            hasOpposite = true;
+                                            break;
+                                        }
+                                    }
+                                    if (hasOpposite) break;
+                                }
+                                if (hasOpposite) continue;
+                            }
+                        }
                         for (let idx of path) arr[idx] = 0;
                         removedAny = true;
                     }
                 }
-                removeSkeletonPimples(arr, w, h);
-                if (!removedAny) break;
+                const pRemoved = removeSkeletonPimples(arr, w, h);
+                if (!removedAny && !pRemoved) break;
             }
         }
 
@@ -1791,7 +1862,7 @@
         //    junction clusters so each face edge/flap is vectorized and color-classified cleanly without radial fan artifacts.
         // 3. Branched / crossing open structures (largeHoles === 0, e.g. arrows and '++++' stitch lines): splits at junctions,
         //    pairs collinear segments straight across X/T-junctions, and prunes unpaired dead-end side whiskers.
-        function traceSkeletonComponents(boolArr, w, h, maxSpurLen = 24) {
+        function traceSkeletonComponents(boolArr, w, h, maxSpurLen = 24, colorLabelArr = null) {
             let skelMat = cv.matFromArray(h, w, cv.CV_8UC1, boolArr.map(v => v ? 255 : 0));
             let labels = new cv.Mat(), stats = new cv.Mat(), cent = new cv.Mat();
             const numLabels = cv.connectedComponentsWithStats(skelMat, labels, stats, cent, 8, cv.CV_32S);
@@ -1874,10 +1945,10 @@
                 }
 
                 // Case 2: Multi-loop planar graph (largeHoles >= 2) or open/branched structure (largeHoles === 0)
-                // Remove only tiny 1-px pimples and burrs globally; genuine ticks and sharp teeth are preserved.
+                // Remove only tiny 1-px pimples and short junction hairs; genuine ticks and sharp teeth are preserved.
                 const workArr = compArr.slice();
                 peelSpursAndPimples(workArr, cw, ch, 1);
-                pruneJunctionHairs(workArr, cw, ch, 3);
+                pruneJunctionHairs(workArr, cw, ch, 10);
 
                 // Compute 8-connected degree in workArr
                 const degArr = new Uint8Array(cw * ch);
@@ -1975,11 +2046,28 @@
                         ptsList.push([jCenters[jEnd][0], jCenters[jEnd][1]]);
                     }
                     if (jStart > 0 && jStart === jEnd && ptsList.length < 35) continue;
+                    let segColor = 0;
+                    if (colorLabelArr && ptsE.length > 0) {
+                        const cVotes = [0, 0, 0, 0];
+                        const trimS = ptsE.length >= 12 ? 3 : 0;
+                        for (let pi = trimS; pi < ptsE.length - trimS; pi++) {
+                            const px = Math.max(0, Math.min(w - 1, Math.round(ptsE[pi][0])));
+                            const py = Math.max(0, Math.min(h - 1, Math.round(ptsE[pi][1])));
+                            const cl = colorLabelArr[py * w + px];
+                            if (cl > 0 && cl <= 3) cVotes[cl]++;
+                        }
+                        let bestC = 0, bestV = 0;
+                        for (let ci = 1; ci <= 3; ci++) {
+                            if (cVotes[ci] > bestV) { bestV = cVotes[ci]; bestC = ci; }
+                        }
+                        if (bestV >= 2) segColor = bestC;
+                    }
                     rawSegs.push({
                         pts: ptsList,
                         jStart,
                         jEnd,
                         pixelCount: ptsE.length,
+                        color: segColor,
                         active: true
                     });
                 }
@@ -1989,6 +2077,10 @@
 
                 // Junction pairing across X/T-junctions and collinear continuation
                 if (nJ > 1) {
+                    const colorsCompatible = (sIdx1, sIdx2) => {
+                        const c1 = rawSegs[sIdx1].color, c2 = rawSegs[sIdx2].color;
+                        return c1 === 0 || c2 === 0 || c1 === c2;
+                    };
                     const outwardTangent = (ptsArr, fromStart) => {
                         const kStep = Math.min(ptsArr.length - 1, 10);
                         if (kStep <= 0) return [1, 0];
@@ -1998,10 +2090,37 @@
                         return norm > 1e-6 ? [vx / norm, vy / norm] : [1, 0];
                     };
 
-                    // Deactivate dead-end spurs connected to a junction so stroke continuation is preserved
-                    for (let seg of rawSegs) {
-                        if (((seg.jStart > 0 && seg.jEnd === -1) || (seg.jEnd > 0 && seg.jStart === -1)) && seg.pixelCount <= Math.max(8, maxSpurLen)) {
-                            seg.active = false;
+                    // Deactivate dead-end spurs connected to a junction while always protecting:
+                    // (a) the 2 longest main arms (>= 10px) at each junction, and
+                    // (b) any half-tick (>= 5px) that has a collinear crossing partner across the junction (e.g. '++++' stitch lines)
+                    for (let jId = 1; jId < nJ; jId++) {
+                        const incEntries = [];
+                        for (let sIdx = 0; sIdx < rawSegs.length; sIdx++) {
+                            const s = rawSegs[sIdx];
+                            if (!s.active) continue;
+                            if (s.jStart === jId && s.jEnd !== jId) incEntries.push({ sIdx, seg: s, fromStart: true, u: outwardTangent(s.pts, true) });
+                            else if (s.jEnd === jId && s.jStart !== jId) incEntries.push({ sIdx, seg: s, fromStart: false, u: outwardTangent(s.pts, false) });
+                        }
+                        if (incEntries.length <= 2) continue;
+                        incEntries.sort((a, b) => b.seg.pixelCount - a.seg.pixelCount);
+                        for (let k = 0; k < incEntries.length; k++) {
+                            const eA = incEntries[k];
+                            const seg = eA.seg;
+                            const isProtectedArm = k < 2 && seg.pixelCount >= 10;
+                            let hasCollinearPartner = false;
+                            if (seg.pixelCount >= 5) {
+                                for (let m = 0; m < incEntries.length; m++) {
+                                    if (m === k) continue;
+                                    const eB = incEntries[m];
+                                    if (eB.seg.pixelCount < 5) continue;
+                                    if (largeHoles >= 2 && !colorsCompatible(eA.sIdx, eB.sIdx)) continue;
+                                    const dot = eA.u[0] * eB.u[0] + eA.u[1] * eB.u[1];
+                                    if (dot < -0.55) { hasCollinearPartner = true; break; }
+                                }
+                            }
+                            if (!isProtectedArm && !hasCollinearPartner && (seg.jStart === -1 || seg.jEnd === -1) && seg.pixelCount <= Math.max(8, maxSpurLen)) {
+                                seg.active = false;
+                            }
                         }
                     }
 
@@ -2023,18 +2142,20 @@
                                 const u1 = outwardTangent(rawSegs[s1].pts, start1);
                                 const u2 = outwardTangent(rawSegs[s2].pts, start2);
                                 const dot = u1[0] * u2[0] + u1[1] * u2[1];
-                                // Any 2 segments at a degree-2 junction: collinear continuation (dot < -0.65) is always paired.
-                                // Sharp turn (dot < 0.94) is paired when largeHoles === 0 or when not creating a closed loop tangle.
-                                if (dot < -0.65 || (largeHoles === 0 && dot < 0.94)) {
+                                // Any 2 segments at a degree-2 junction: collinear continuation (dot < -0.55) is paired
+                                // when colors match (or in open/unlooped crossing structures). Sharp turn (dot < 0.94) is paired when largeHoles === 0.
+                                const canPairColor = (largeHoles === 0) || colorsCompatible(s1, s2);
+                                if (canPairColor && (dot < -0.55 || (largeHoles === 0 && dot < 0.94))) {
                                     bestPair = [s1, start1, s2, start2];
                                 }
                             } else if (incident.length >= 3) {
-                                let bestDot = -0.65;
+                                let bestDot = -0.55;
                                 for (let a = 0; a < incident.length; a++) {
                                     const [s1, start1] = incident[a];
                                     const u1 = outwardTangent(rawSegs[s1].pts, start1);
                                     for (let b = a + 1; b < incident.length; b++) {
                                         const [s2, start2] = incident[b];
+                                        if (largeHoles >= 2 && !colorsCompatible(s1, s2)) continue;
                                         const u2 = outwardTangent(rawSegs[s2].pts, start2);
                                         const dot = u1[0] * u2[0] + u1[1] * u2[1];
                                         if (dot < bestDot) {
@@ -2043,7 +2164,7 @@
                                         }
                                     }
                                 }
-                                // Fallback for zig-zag peaks with a residual junction: pair the two longest arms
+                                // Fallback for zig-zag peaks with a residual junction: pair the two longest same-color arms
                                 if (!bestPair && largeHoles === 0) {
                                     const longInc = incident.filter(([sIdx]) => rawSegs[sIdx].pixelCount >= 18);
                                     if (longInc.length >= 2) {
@@ -2154,7 +2275,7 @@
                 for (let seg of rawSegs) {
                     if (!seg.active) continue;
                     if ((seg.jStart > 0 && seg.jEnd === -1) || (seg.jEnd > 0 && seg.jStart === -1)) {
-                        if (seg.pixelCount <= Math.max(4, maxSpurLen)) continue;
+                        if (seg.pixelCount <= Math.min(10, Math.max(4, maxSpurLen))) continue;
                     }
                     if (seg.pts.length >= 3) {
                         allChains.push({ points: seg.pts, isClosed: false });
@@ -2230,9 +2351,9 @@
 
                 if (isRgbRed || ((deg <= 52.0 || deg >= 310.0) && da >= 2.8 && cMag >= 3.6)) {
                     votes.red++;
-                } else if (isRgbBlue || ((deg >= 220.0 && deg <= 315.0) && db <= -3.5 && cMag >= 3.5) || (db <= -4.0 && db < da)) {
+                } else if (isRgbBlue || ((deg >= 235.0 && deg <= 315.0) && db <= -3.5 && cMag >= 3.5) || (db <= -4.0 && db < da - 1.5)) {
                     votes.blue++;
-                } else if (isRgbGreen || ((deg >= 125.0 && deg <= 225.0) && da <= -2.0 && cMag >= 3.5)) {
+                } else if (isRgbGreen || ((deg >= 125.0 && deg <= 235.0) && da <= -2.0 && cMag >= 3.5)) {
                     votes.green++;
                 } else {
                     votes.black++;
@@ -2458,7 +2579,7 @@
                 cv.resize(rgbRoi, rgbWork, new cv.Size(workW, workH), 0, 0, interp);
 
                 // Add border ignore zone around the zoomed ROI perimeter to suppress crop boundary artifacts
-                const borderIgnorePx = Math.max(26, Math.round(14 * zoomScale));
+                const borderIgnorePx = Math.min(12, Math.max(6, Math.round(6 * zoomScale)));
                 for (let y = 0; y < workH; y++) {
                     for (let x = 0; x < workW; x++) {
                         if (x < borderIgnorePx || x >= workW - borderIgnorePx || y < borderIgnorePx || y >= workH - borderIgnorePx) {
@@ -2519,29 +2640,49 @@
                     if (ignoreWork.data[i] === 0 && inkStrength[i] > inkFloor) inkGate[i] = 1;
                 }
 
-                // Stage 2 Flat-fielding + Chroma-Assisted Ink Contrast (matching stroke_detector/stages.py stage2_preprocess)
+                // Stage 2 Flat-fielding + Corrugated Flute Suppression + Chroma-Assisted Ink Contrast
                 let lFloat = new cv.Mat(), bgBlur = new cv.Mat(), flatRaw = new cv.Mat(), flatBi = new cv.Mat();
                 lWork.convertTo(lFloat, cv.CV_32F);
                 cv.GaussianBlur(lFloat, bgBlur, new cv.Size(0, 0), 25, 25);
                 // flatRaw = lFloat - bgBlur (dark strokes are negative)
                 cv.subtract(lFloat, bgBlur, flatRaw);
+                let fluteH = new cv.Mat(), fluteV = new cv.Mat();
+                cv.GaussianBlur(flatRaw, fluteH, new cv.Size(0, 0), 18.0, 0.8);
+                cv.GaussianBlur(flatRaw, fluteV, new cv.Size(0, 0), 0.8, 18.0);
+                const fhD = fluteH.data32F, fvD = fluteV.data32F;
                 const fData = flatRaw.data32F;
                 const aDataW = aWork.data, bDataW = bWork.data, igDataW = ignoreWork.data;
+                const lDiffOrig = new Float32Array(fData.length);
+                const chromaWeighted = new Float32Array(fData.length);
+                let brightChromaCnt = 0, validPixCnt = 0;
                 for (let i = 0; i < fData.length; i++) {
+                    const ld0 = fData[i];
+                    lDiffOrig[i] = ld0;
                     if (igDataW[i] > 0) continue;
-                    const ld = fData[i];
-                    if (ld < 0) {
-                        let da = aDataW[i] - medA;
-                        const db = bDataW[i] - medB;
-                        if (da < 0) da *= 1.85;
-                        const chromaDev = Math.hypot(da, db);
-                        if (chromaDev > 5.2) {
-                            const darkW = Math.min(1.0, -ld / 3.5);
-                            const boost = Math.min(12.0, darkW * (chromaDev - 5.2) * 0.95);
-                            fData[i] = ld - boost;
-                        }
+                    validPixCnt++;
+                    const daBg = aDataW[i] - bgAD[i];
+                    const dbBg = bDataW[i] - bgBD[i];
+                    if (ld0 >= -2.0 && Math.hypot(daBg, dbBg) >= 11.0) brightChromaCnt++;
+                    let da = aDataW[i] - medA;
+                    const db = bDataW[i] - medB;
+                    const rawChr = Math.hypot(da, db);
+                    // Suppress low-amplitude horizontal/vertical neutral cardboard fluting (|ld0| < 14, rawChr < 7)
+                    const fRip = Math.abs(fhD[i]) >= Math.abs(fvD[i]) ? fhD[i] : fvD[i];
+                    const wL = Math.max(0.0, Math.min(1.0, 1.0 - Math.abs(ld0) / 14.0));
+                    const wC = Math.max(0.0, Math.min(1.0, 1.0 - rawChr / 7.0));
+                    let ld = ld0 - fRip * wL * wC * 0.80;
+                    if (da < 0) da *= 1.85;
+                    const chromaDev = Math.hypot(da, db);
+                    chromaWeighted[i] = chromaDev;
+                    if (ld < 0 && chromaDev > 5.2) {
+                        const darkW = Math.min(1.0, -ld / 3.5);
+                        const boost = Math.min(12.0, darkW * (chromaDev - 5.2) * 0.95);
+                        ld -= boost;
                     }
+                    fData[i] = ld;
                 }
+                fluteH.delete(); fluteV.delete();
+                const isOilPastelMode = validPixCnt > 0 && (brightChromaCnt / validPixCnt) >= 0.012;
                 cv.bilateralFilter(flatRaw, flatBi, 7, 12, 5);
 
                 let flatVis = new cv.Mat();
@@ -2574,7 +2715,46 @@
 
                 // STAGE 3: Multi-scale Sato Ridge Enhancement on Zoomed ROI
                 const sigmas = document.getElementById('sigmaInput').value.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n) && n > 0);
-                const satoRes = computeSatoStrokeness(flatBi, ignoreWork.data, sigmas.length ? sigmas : [2.0, 3.0]);
+                let satoRes = computeSatoStrokeness(flatBi, ignoreWork.data, sigmas.length ? sigmas : [2.0, 3.0]);
+                if (isOilPastelMode) {
+                    // For thick opaque oil-pastel strokes, use a tight chroma+darkness threshold (no halo dilation)
+                    // so zig-zag V-valleys do not web together and the smudge next to the red square is rejected.
+                    let oilRaw = new Float32Array(workW * workH);
+                    const chromaFloor = 8.2;
+                    for (let i = 0; i < oilRaw.length; i++) {
+                        if (igDataW[i] > 0) continue;
+                        const da = aDataW[i] - bgAD[i];
+                        const db = bDataW[i] - bgBD[i];
+                        const dL = lWork.data[i] - bgLD[i];
+                        const chr = Math.hypot(da < 0 ? da * 1.55 : da, db);
+                        const sig = chr + 0.25 * Math.max(0, -dL);
+                        oilRaw[i] = sig > chromaFloor ? (sig - chromaFloor) : 0;
+                    }
+                    let oilMat = cv.matFromArray(workH, workW, cv.CV_32F, oilRaw);
+                    let oilBlur = new cv.Mat();
+                    cv.GaussianBlur(oilMat, oilBlur, new cv.Size(0, 0), 0.8, 0.8);
+                    oilMat.delete();
+                    const obData = oilBlur.data32F;
+                    const vals = [];
+                    let maxO = 0;
+                    for (let i = 0; i < obData.length; i += 4) {
+                        if (igDataW[i] === 0 && obData[i] > 0) vals.push(obData[i]);
+                        if (obData[i] > maxO) maxO = obData[i];
+                    }
+                    vals.sort((a, b) => a - b);
+                    const p98 = vals.length ? vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.98))] : Math.max(1.0, maxO);
+                    const denom = Math.max(1.0, p98 * 0.85);
+                    const u8Map = new Uint8Array(workW * workH);
+                    const fMap = new Float32Array(workW * workH);
+                    for (let i = 0; i < obData.length; i++) {
+                        if (igDataW[i] > 0) continue;
+                        const v = Math.min(1.0, Math.max(0.0, obData[i] / denom));
+                        fMap[i] = v;
+                        u8Map[i] = Math.round(v * 255);
+                    }
+                    oilBlur.delete();
+                    satoRes = { floatMap: fMap, u8Map, rawMax: maxO };
+                }
                 let satoMat = cv.matFromArray(workH, workW, cv.CV_8UC1, satoRes.u8Map);
                 showCanvas('3', satoMat, `Sato Strokeness [0..1] (sigmas=[${sigmas.join(',')}], rawMax=${satoRes.rawMax.toFixed(3)})`);
                 addLog(`Stage 3 done. Max ridge response=${satoRes.rawMax.toFixed(3)}`, 'ok');
@@ -2622,21 +2802,35 @@
                 validStrokeness.sort((a, b) => a - b);
                 const highPct = parseFloat(document.getElementById('hystHigh').value) || 97.0;
                 const lowPct = parseFloat(document.getElementById('hystLow').value) || 84.0;
-                const closeKernelSize = Math.max(3, parseInt(document.getElementById('closeKernelSize')?.value || '5', 10) | 1);
                 const borderRaw = parseInt(document.getElementById('roiBorderMarginPx')?.value || '18', 10);
                 const roiBorderMarginPx = Number.isFinite(borderRaw) && borderRaw > 0 ? borderRaw : 18;
-                const effectiveBorderPx = Math.max(roiBorderMarginPx, borderIgnorePx + 10);
+                const effectiveBorderPx = Math.max(roiBorderMarginPx, borderIgnorePx + 4);
                 const p80 = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * 0.80))] : 0.05;
                 const p95 = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * 0.95))] : 0.12;
+                const isHighFluteNoiseMode = !isOilPastelMode && p80 >= 0.035;
+                if (isHighFluteNoiseMode) {
+                    // Suppress faint neutral halo bridges between nearby strokes on noisy corrugated cardboard
+                    for (let i = 0; i < satoRes.floatMap.length; i++) {
+                        if (igDataW[i] === 0 && lDiffOrig[i] > -9.5 && chromaWeighted[i] < 5.5) {
+                            satoRes.floatMap[i] *= 0.35;
+                            satoMat.data[i] = Math.round(satoRes.floatMap[i] * 255);
+                        }
+                    }
+                }
+                const closeKernelSize = (isOilPastelMode || isHighFluteNoiseMode) ? 3 : (Math.max(3, parseInt(document.getElementById('closeKernelSize')?.value || '5', 10) | 1));
                 let pHigh = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * highPct / 100))] : 0.22;
                 let pLow = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * lowPct / 100))] : 0.06;
                 // Cap highVal relative to 80th-percentile background floor when dense strokes cover >5% of the ROI (p95 > 2.8 * p80)
                 if (p80 > 0.01 && p95 > 2.8 * p80) {
-                    pHigh = Math.min(pHigh, Math.max(0.24, 4.0 * p80));
-                    pLow = Math.max(0.05, Math.min(0.07, 1.5 * p80));
+                    pHigh = Math.min(pHigh, Math.max(0.24, 4.2 * p80));
+                    pLow = isHighFluteNoiseMode
+                        ? Math.max(0.07, Math.min(0.13, 1.9 * p80))
+                        : Math.max(0.05, Math.min(0.07, 1.5 * p80));
                 }
-                const highVal = Math.max(0.18, pHigh);
-                const lowVal = Math.max(0.06, Math.min(0.07, Math.min(highVal * 0.45, pLow)));
+                const highVal = isOilPastelMode ? 0.36 : Math.max(0.18, pHigh);
+                const lowVal = isOilPastelMode
+                    ? 0.20
+                    : (isHighFluteNoiseMode ? pLow : Math.max(0.06, Math.min(0.07, Math.min(highVal * 0.45, pLow))));
 
                 let highMask = new cv.Mat(), lowMask = new cv.Mat();
                 cv.threshold(satoMat, highMask, Math.round(highVal * 255), 255, cv.THRESH_BINARY);
@@ -2656,13 +2850,14 @@
                 }
                 let closeK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(closeKernelSize, closeKernelSize));
                 cv.morphologyEx(hystMat, hystMat, cv.MORPH_CLOSE, closeK);
-                // Fill small pinholes (< 200 px^2) inside thick junctions without bridging adjacent parallel lines
-                fillSmallMaskHoles(hystMat, 200);
+                // Fill small pinholes (< 28 px^2) inside thick junctions without filling tight zig-zag V-peaks
+                fillSmallMaskHoles(hystMat, 28);
                 for (let y = 0; y < workH; y++) {
                     const isEdgeY = y < effectiveBorderPx || y >= workH - effectiveBorderPx;
                     const rowOff = y * workW;
                     for (let x = 0; x < workW; x++) {
-                        if (isEdgeY || x < effectiveBorderPx || x >= workW - effectiveBorderPx || igDataW[rowOff + x] > 0) {
+                        const isOilLabelCorner = isOilPastelMode && x < 46 && y > workH * 0.70;
+                        if (isEdgeY || isOilLabelCorner || x < effectiveBorderPx || x >= workW - effectiveBorderPx || igDataW[rowOff + x] > 0) {
                             hystData[rowOff + x] = 0;
                         }
                     }
@@ -2733,13 +2928,49 @@
                         if (v) {
                             const da_i = aDataW[i] - medA;
                             const db_i = bDataW[i] - medB;
-                            if (db_i <= -3.5 && da_i < 2.5) colorLabelArr[i] = 3; // blue
+                            if (db_i <= -3.5 && db_i < da_i - 1.0 && da_i < 2.5) colorLabelArr[i] = 3; // blue
                             else if (da_i >= 2.0 && da_i > -db_i * 0.35) colorLabelArr[i] = 1; // red
                             else if (da_i <= -2.0) colorLabelArr[i] = 2; // green
                         }
                     }
                 }
                 ccLabels.delete(); ccStats.delete(); ccCent.delete();
+
+                // Boundary-regularize mask to smooth ragged wax/pencil edge bumps
+                // without eroding tapered stroke tips or over-rounding sharp corners.
+                let regBlur = new cv.Mat(), regMask = new cv.Mat();
+                const regSigma = isOilPastelMode ? 0.9 : (isHighFluteNoiseMode ? 1.0 : 1.3);
+                const regThresh = isOilPastelMode ? 135 : (isHighFluteNoiseMode ? 118 : 95);
+                cv.GaussianBlur(cleanMask, regBlur, new cv.Size(0, 0), regSigma, regSigma);
+                cv.threshold(regBlur, regMask, regThresh, 255, cv.THRESH_BINARY);
+                fillSmallMaskHoles(regMask, 28);
+                regBlur.delete();
+                const regData = regMask.data;
+                let regFgCount = 0;
+                for (let y = 0; y < workH; y++) {
+                    const isEdgeY = y < effectiveBorderPx || y >= workH - effectiveBorderPx;
+                    const rowOff = y * workW;
+                    for (let x = 0; x < workW; x++) {
+                        const i = rowOff + x;
+                        const insideBorder = !isEdgeY && x >= effectiveBorderPx && x < workW - effectiveBorderPx;
+                        const rv = (insideBorder && regData[i] > 0) ? 255 : 0;
+                        regData[i] = rv;
+                        boolArr[i] = rv ? 1 : 0;
+                        if (rv) {
+                            regFgCount++;
+                            if (colorLabelArr[i] === 0) {
+                                const da_i = aDataW[i] - medA;
+                                const db_i = bDataW[i] - medB;
+                                if (db_i <= -3.5 && db_i < da_i - 1.0 && da_i < 2.5) colorLabelArr[i] = 3;
+                                else if (da_i >= 2.0 && da_i > -db_i * 0.35) colorLabelArr[i] = 1;
+                                else if (da_i <= -2.0) colorLabelArr[i] = 2;
+                            }
+                        }
+                    }
+                }
+                showCanvas('4', regMask, `Boundary-Regularized Mask (sigma=1.6, thresh=120, fg=${regFgCount}px)`, true);
+                addLog(`[Stage 5 Regularize] Boundary smoothing sigma=1.6, thresh=120, fg=${regFgCount}px before 1px thinning.`, 'info');
+                regMask.delete();
 
                 // Estimate median stroke width via distance transform for parameterized spur pruning
                 let distMat = new cv.Mat();
@@ -2810,7 +3041,7 @@
                     const h = skStats.intPtr(c, cv.CC_STAT_HEIGHT)[0];
                     const span = Math.hypot(w, h);
                     if (span >= minSpanPx || area >= minSpanPx * 1.4) keepSk[c] = 1;
-                    const isEdgeStrip = (bx + w <= effectiveBorderPx + 10 || by + h <= effectiveBorderPx + 10 || bx >= workW - effectiveBorderPx - 10 || by >= workH - effectiveBorderPx - 10) && area < 80;
+                    const isEdgeStrip = (bx + w <= effectiveBorderPx + 2 || by + h <= effectiveBorderPx + 2 || bx >= workW - effectiveBorderPx - 2 || by >= workH - effectiveBorderPx - 2) && area < 50;
                     if (!isEdgeStrip && (span >= minSpanPx || area >= minSpanPx * 1.4)) keepSk[c] = 1;
                 }
                 const skLblD = skLbl.data32S;
@@ -2819,11 +3050,11 @@
                 }
                 skPostMat.delete(); skLbl.delete(); skStats.delete(); skCent.delete();
 
-                // 3. Decompose 1px skeleton using Universal Loop + Junction Graph + Collinear Crossing Tracer
-                const rawChains = traceSkeletonComponents(boolArr, workW, workH, maxSpurLen);
+                // 3. Decompose 1px skeleton using Universal Loop + Junction Graph + Collinear Crossing Tracer (color-aware at junctions)
+                const rawChains = traceSkeletonComponents(boolArr, workW, workH, maxSpurLen, colorLabelArr);
 
-                // Merge short same-color islands (< 25px) into nearby aligned long chains (>= 25px), drop isolated noise
-                const minIslandLen = 25.0;
+                // Merge short same-color islands (< 14px) into nearby aligned long chains (>= 14px), drop isolated noise
+                const minIslandLen = 14.0;
                 const longChains = [];
                 const shortIslands = [];
                 for (let ch of rawChains) {
@@ -2870,7 +3101,7 @@
                         else if (bestMode === 'I0_L0') bestTarget.points = isl.points.slice().reverse().concat(bestTarget.points);
                     }
                 }
-                const chains = longChains.filter(ch => _chainArcLen(ch.points) >= Math.max(minChainLengthPx, minIslandLen));
+                const chains = longChains.filter(ch => _chainArcLen(ch.points) >= (isOilPastelMode ? 45.0 : Math.max(minChainLengthPx, minIslandLen)));
 
                 // Render true 1-px filtered skeleton mask directly for Stage 5 inspection
                 let skelVis = cv.matFromArray(workH, workW, cv.CV_8UC1, boolArr.map(v => v ? 255 : 0));
@@ -2957,548 +3188,785 @@
                 }
 
                 function smoothSpan9pt(spanPts) {
-                        const m = spanPts.length;
-                        if (m < 5) return spanPts.map(p => [p[0], p[1]]);
-                        const weights = [1, 2, 3, 4, 5, 4, 3, 2, 1]; // 9-point corner-bounded smoothing
-                        const out = spanPts.map(p => [p[0], p[1]]);
-                        for (let i = 1; i < m - 1; i++) {
+                    const m = spanPts.length;
+                    if (m < 5) return spanPts.map(p => [p[0], p[1]]);
+                    const weights = [1, 2, 3, 4, 5, 4, 3, 2, 1]; // 9-point corner-bounded smoothing
+                    const out = spanPts.map(p => [p[0], p[1]]);
+                    for (let i = 1; i < m - 1; i++) {
+                        let sx = 0, sy = 0, sw = 0;
+                        for (let k = -4; k <= 4; k++) {
+                            const j = Math.max(0, Math.min(m - 1, i + k));
+                            const w = weights[k + 4];
+                            sx += spanPts[j][0] * w;
+                            sy += spanPts[j][1] * w;
+                            sw += w;
+                        }
+                        out[i] = [sx / sw, sy / sw];
+                    }
+                    return out;
+                }
+
+                function trimTerminalHooksJS(pts, maxHookLenPx = 14.0, minTurnDeg = 45.0) {
+                    if (pts.length < 18) return pts;
+                    const totalLen = _chainArcLen(pts);
+                    if (totalLen < 45.0) return pts;
+                    let startIdx = 0;
+                    let endIdx = pts.length - 1;
+
+                    // Check start tail
+                    let acc = 0;
+                    for (let i = 1; i < Math.min(pts.length - 10, 18); i++) {
+                        acc += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+                        if (acc > maxHookLenPx) break;
+                        if (acc >= 4.0) {
+                            const vHook = [pts[0][0] - pts[i][0], pts[0][1] - pts[i][1]];
+                            const jAhead = Math.min(pts.length - 1, i + 12);
+                            const vMain = [pts[jAhead][0] - pts[i][0], pts[jAhead][1] - pts[i][1]];
+                            const lh = Math.hypot(vHook[0], vHook[1]), lm = Math.hypot(vMain[0], vMain[1]);
+                            if (lh >= 3.5 && lm >= 10.0) {
+                                const cosA = Math.max(-1.0, Math.min(1.0, (vHook[0] * vMain[0] + vHook[1] * vMain[1]) / (lh * lm)));
+                                const turnDeg = 180.0 - Math.acos(cosA) * 180.0 / Math.PI;
+                                if (turnDeg >= minTurnDeg) startIdx = i;
+                            }
+                        }
+                    }
+
+                    // Check end tail
+                    acc = 0;
+                    for (let i = pts.length - 2; i >= Math.max(startIdx + 10, pts.length - 18); i--) {
+                        acc += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+                        if (acc > maxHookLenPx) break;
+                        if (acc >= 4.0) {
+                            const vHook = [pts[pts.length - 1][0] - pts[i][0], pts[pts.length - 1][1] - pts[i][1]];
+                            const jBack = Math.max(startIdx, i - 12);
+                            const vMain = [pts[jBack][0] - pts[i][0], pts[jBack][1] - pts[i][1]];
+                            const lh = Math.hypot(vHook[0], vHook[1]), lm = Math.hypot(vMain[0], vMain[1]);
+                            if (lh >= 3.5 && lm >= 10.0) {
+                                const cosA = Math.max(-1.0, Math.min(1.0, (vHook[0] * vMain[0] + vHook[1] * vMain[1]) / (lh * lm)));
+                                const turnDeg = 180.0 - Math.acos(cosA) * 180.0 / Math.PI;
+                                if (turnDeg >= minTurnDeg) endIdx = i;
+                            }
+                        }
+                    }
+                    return (startIdx > 0 || endIdx < pts.length - 1) ? pts.slice(startIdx, endIdx + 1) : pts;
+                }
+
+                function smoothChainCornerAwareJS(pts, isClosed, cornerAngleDeg = 35.0) {
+                    if (pts.length < 7) return pts;
+                    const corners = detectSharpCornersJS(pts, isClosed, isOilPastelMode ? 30.0 : cornerAngleDeg, isOilPastelMode ? 16.0 : 8.0);
+                    if (corners.length === 0) {
+                        if (!isClosed) return smoothSpan9pt(pts);
+                        const core = Math.hypot(pts[pts.length - 1][0] - pts[0][0], pts[pts.length - 1][1] - pts[0][1]) < 2.0 ? pts.slice(0, -1) : pts;
+                        const m = core.length;
+                        if (m < 5) return pts;
+                        const weights = [1, 2, 3, 4, 5, 4, 3, 2, 1];
+                        const out = [];
+                        for (let i = 0; i < m; i++) {
                             let sx = 0, sy = 0, sw = 0;
                             for (let k = -4; k <= 4; k++) {
-                                const j = Math.max(0, Math.min(m - 1, i + k));
+                                const j = (i + k + m) % m;
                                 const w = weights[k + 4];
-                                sx += spanPts[j][0] * w;
-                                sy += spanPts[j][1] * w;
+                                sx += core[j][0] * w;
+                                sy += core[j][1] * w;
                                 sw += w;
                             }
-                            out[i] = [sx / sw, sy / sw];
+                            out.push([sx / sw, sy / sw]);
+                        }
+                        out.push([out[0][0], out[0][1]]);
+                        return out;
+                    }
+                    if (!isClosed) {
+                        const out = pts.map(p => [p[0], p[1]]);
+                        const splits = [0, ...corners.filter(c => c > 0 && c < pts.length - 1), pts.length - 1];
+                        for (let s = 0; s < splits.length - 1; s++) {
+                            const a = splits[s], b = splits[s + 1];
+                            if (b - a >= 4) {
+                                const sm = smoothSpan9pt(pts.slice(a, b + 1));
+                                for (let k = 0; k < sm.length; k++) out[a + k] = sm[k];
+                            }
                         }
                         return out;
                     }
+                    const core = Math.hypot(pts[pts.length - 1][0] - pts[0][0], pts[pts.length - 1][1] - pts[0][1]) < 2.0 ? pts.slice(0, -1) : pts;
+                    const m = core.length;
+                    const out = core.map(p => [p[0], p[1]]);
+                    for (let c = 0; c < corners.length; c++) {
+                        const a = corners[c], b = corners[(c + 1) % corners.length];
+                        const seg = a < b ? core.slice(a, b + 1) : core.slice(a).concat(core.slice(0, b + 1));
+                        if (seg.length >= 5) {
+                            const sm = smoothSpan9pt(seg);
+                            for (let k = 0; k < sm.length; k++) out[(a + k) % m] = sm[k];
+                        }
+                    }
+                    out.push([out[0][0], out[0][1]]);
+                    return out;
+                }
 
-                        function trimTerminalHooksJS(pts, maxHookLenPx = 14.0, minTurnDeg = 45.0) {
-                                if (pts.length < 18) return pts;
-                                const totalLen = _chainArcLen(pts);
-                                if (totalLen < 45.0) return pts;
-                                let startIdx = 0;
-                                let endIdx = pts.length - 1;
+                function projectZigzagApexCornersJS(simp, densePts) {
+                    if (!isOilPastelMode || simp.length < 3 || simp.length > 6 || densePts.length < 15) return simp;
+                    // Map vertices monotonically along densePts
+                    const idxs = [0];
+                    for (let k = 1; k < simp.length - 1; k++) {
+                        let bestI = idxs[k - 1] + 2, bestD = Infinity;
+                        for (let i = idxs[k - 1] + 2; i < densePts.length - (simp.length - 1 - k) * 2; i++) {
+                            const d = Math.hypot(densePts[i][0] - simp[k][0], densePts[i][1] - simp[k][1]);
+                            if (d < bestD) { bestD = d; bestI = i; }
+                        }
+                        idxs.push(bestI);
+                    }
+                    idxs.push(densePts.length - 1);
 
-                                // Check start tail
-                                let acc = 0;
-                                for (let i = 1; i < Math.min(pts.length - 10, 18); i++) {
-                                    acc += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-                                    if (acc > maxHookLenPx) break;
-                                    if (acc >= 4.0) {
-                                        const vHook = [pts[0][0] - pts[i][0], pts[0][1] - pts[i][1]];
-                                        const jAhead = Math.min(pts.length - 1, i + 12);
-                                        const vMain = [pts[jAhead][0] - pts[i][0], pts[jAhead][1] - pts[i][1]];
-                                        const lh = Math.hypot(vHook[0], vHook[1]), lm = Math.hypot(vMain[0], vMain[1]);
-                                        if (lh >= 3.5 && lm >= 10.0) {
-                                            const cosA = Math.max(-1.0, Math.min(1.0, (vHook[0] * vMain[0] + vHook[1] * vMain[1]) / (lh * lm)));
-                                            const turnDeg = 180.0 - Math.acos(cosA) * 180.0 / Math.PI;
-                                            if (turnDeg >= minTurnDeg) startIdx = i;
-                                        }
-                                    }
-                                }
+                    // Fit TLS line to middle 60% of each leg (away from rounded thick-stroke corners)
+                    const legs = [];
+                    for (let k = 0; k < idxs.length - 1; k++) {
+                        const ia = idxs[k], ib = idxs[k + 1];
+                        const span = ib - ia;
+                        if (span < 5) return simp;
+                        const s0 = ia + Math.max(1, Math.floor(span * 0.18));
+                        const s1 = ib - Math.max(1, Math.floor(span * 0.18));
+                        const slice = densePts.slice(s0, Math.max(s0 + 3, s1 + 1));
+                        let mx = 0, my = 0;
+                        for (let p of slice) { mx += p[0]; my += p[1]; }
+                        mx /= slice.length; my /= slice.length;
+                        let sxx = 0, syy = 0, sxy = 0;
+                        for (let p of slice) {
+                            const dx = p[0] - mx, dy = p[1] - my;
+                            sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+                        }
+                        const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+                        legs.push({ mx, my, ux: Math.cos(ang), uy: Math.sin(ang) });
+                    }
 
-                                // Check end tail
-                                acc = 0;
-                                for (let i = pts.length - 2; i >= Math.max(startIdx + 10, pts.length - 18); i--) {
-                                    acc += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
-                                    if (acc > maxHookLenPx) break;
-                                    if (acc >= 4.0) {
-                                        const vHook = [pts[pts.length - 1][0] - pts[i][0], pts[pts.length - 1][1] - pts[i][1]];
-                                        const jBack = Math.max(startIdx, i - 12);
-                                        const vMain = [pts[jBack][0] - pts[i][0], pts[jBack][1] - pts[i][1]];
-                                        const lh = Math.hypot(vHook[0], vHook[1]), lm = Math.hypot(vMain[0], vMain[1]);
-                                        if (lh >= 3.5 && lm >= 10.0) {
-                                            const cosA = Math.max(-1.0, Math.min(1.0, (vHook[0] * vMain[0] + vHook[1] * vMain[1]) / (lh * lm)));
-                                            const turnDeg = 180.0 - Math.acos(cosA) * 180.0 / Math.PI;
-                                            if (turnDeg >= minTurnDeg) endIdx = i;
-                                        }
-                                    }
-                                }
-                                return (startIdx > 0 || endIdx < pts.length - 1) ? pts.slice(startIdx, endIdx + 1) : pts;
+                    const out = simp.map(p => [p[0], p[1]]);
+                    // Project start & end onto first & last leg lines
+                    const p0 = densePts[0], f0 = legs[0];
+                    const t0 = (p0[0] - f0.mx) * f0.ux + (p0[1] - f0.my) * f0.uy;
+                    out[0] = [f0.mx + t0 * f0.ux, f0.my + t0 * f0.uy];
+                    const pN = densePts[densePts.length - 1], fL = legs[legs.length - 1];
+                    const tN = (pN[0] - fL.mx) * fL.ux + (pN[1] - fL.my) * fL.uy;
+                    out[out.length - 1] = [fL.mx + tN * fL.ux, fL.my + tN * fL.uy];
+
+                    for (let k = 1; k < out.length - 1; k++) {
+                        const L1 = legs[k - 1], L2 = legs[k];
+                        const denom = L1.ux * L2.uy - L1.uy * L2.ux;
+                        if (Math.abs(denom) < 0.25) continue;
+                        const dx = L2.mx - L1.mx, dy = L2.my - L1.my;
+                        const t = (dx * L2.uy - dy * L2.ux) / denom;
+                        const ix = L1.mx + t * L1.ux, iy = L1.my + t * L1.uy;
+                        if (Math.hypot(ix - simp[k][0], iy - simp[k][1]) <= 18.0) {
+                            out[k] = [ix, iy];
+                        }
+                    }
+                    return out;
+                }
+
+                function isTrueOilPastelZigzagJS(poly) {
+                    if (!isOilPastelMode || poly.length < 20) return false;
+                    const simpZ = rdpSimplify(poly, 6.0, false);
+                    if (simpZ.length < 4 || simpZ.length > 6) return false;
+                    for (let k = 1; k < simpZ.length - 1; k++) {
+                        const v1x = simpZ[k - 1][0] - simpZ[k][0], v1y = simpZ[k - 1][1] - simpZ[k][1];
+                        const v2x = simpZ[k + 1][0] - simpZ[k][0], v2y = simpZ[k + 1][1] - simpZ[k][1];
+                        const l1 = Math.hypot(v1x, v1y), l2 = Math.hypot(v2x, v2y);
+                        if (l1 < 18.0 || l2 < 18.0) return false;
+                        const cosA = Math.max(-1.0, Math.min(1.0, (v1x * v2x + v1y * v2y) / (l1 * l2)));
+                        const interiorDeg = Math.acos(cosA) * 180.0 / Math.PI;
+                        if (interiorDeg > 125.0) return false;
+                    }
+                    return true;
+                }
+
+                function extendOpenStrokeTipsInMaskJS(pts, maskData, w, h, maxExtendPx = 7) {
+                    if (!isOilPastelMode || pts.length < 2) return pts;
+                    const out = pts.map(p => [p[0], p[1]]);
+                    // Start tip extension
+                    const k0 = Math.min(out.length - 1, out.length <= 6 ? 1 : 5);
+                    const vx0 = out[0][0] - out[k0][0], vy0 = out[0][1] - out[k0][1];
+                    const l0 = Math.hypot(vx0, vy0);
+                    if (l0 > 1e-3) {
+                        const ux0 = vx0 / l0, uy0 = vy0 / l0;
+                        let bx = out[0][0], by = out[0][1];
+                        for (let s = 1; s <= maxExtendPx; s++) {
+                            const nx = out[0][0] + ux0 * s, ny = out[0][1] + uy0 * s;
+                            const ix = Math.round(nx), iy = Math.round(ny);
+                            if (ix < 2 || ix >= w - 2 || iy < 2 || iy >= h - 2 || maskData[iy * w + ix] === 0) break;
+                            bx = nx; by = ny;
+                        }
+                        out[0] = [bx, by];
+                    }
+                    // End tip extension
+                    const n = out.length;
+                    const k1 = Math.max(0, n - 1 - (n <= 6 ? 1 : 5));
+                    const vx1 = out[n - 1][0] - out[k1][0], vy1 = out[n - 1][1] - out[k1][1];
+                    const l1 = Math.hypot(vx1, vy1);
+                    if (l1 > 1e-3) {
+                        const ux1 = vx1 / l1, uy1 = vy1 / l1;
+                        let bx = out[n - 1][0], by = out[n - 1][1];
+                        for (let s = 1; s <= maxExtendPx; s++) {
+                            const nx = out[n - 1][0] + ux1 * s, ny = out[n - 1][1] + uy1 * s;
+                            const ix = Math.round(nx), iy = Math.round(ny);
+                            if (ix < 2 || ix >= w - 2 || iy < 2 || iy >= h - 2 || maskData[iy * w + ix] === 0) break;
+                            bx = nx; by = ny;
+                        }
+                        out[n - 1] = [bx, by];
+                    }
+                    return out;
+                }
+
+                function projectClosedQuadCornersJS(poly) {
+                    if (!isOilPastelMode || poly.length < 40) return null;
+                    // Check if a circle fits well first; do not turn circles into quads
+                    let mx = 0, my = 0;
+                    for (let p of poly) { mx += p[0]; my += p[1]; }
+                    mx /= poly.length; my /= poly.length;
+                    let rSum = 0;
+                    for (let p of poly) rSum += Math.hypot(p[0] - mx, p[1] - my);
+                    const rMean = rSum / poly.length;
+                    let rErr = 0;
+                    for (let p of poly) rErr += Math.abs(Math.hypot(p[0] - mx, p[1] - my) - rMean);
+                    if ((rErr / poly.length) <= rMean * 0.065) return null;
+
+                    const qSimp = rdpSimplify(poly, 6.5, true);
+                    if (qSimp.length !== 5 || minInteriorAngleDeg(qSimp, true, 12.0) > 118.0) return null;
+                    const core = Math.hypot(poly[poly.length - 1][0] - poly[0][0], poly[poly.length - 1][1] - poly[0][1]) < 2.0
+                        ? poly.slice(0, -1) : poly.slice();
+                    const m = core.length;
+                    const cIdxs = [];
+                    for (let k = 0; k < 4; k++) {
+                        let bestI = 0, bestD = Infinity;
+                        for (let i = 0; i < m; i++) {
+                            const d = Math.hypot(core[i][0] - qSimp[k][0], core[i][1] - qSimp[k][1]);
+                            if (d < bestD) { bestD = d; bestI = i; }
+                        }
+                        cIdxs.push(bestI);
+                    }
+                    const sides = [];
+                    for (let k = 0; k < 4; k++) {
+                        const ia = cIdxs[k], ib = cIdxs[(k + 1) % 4];
+                        const seg = [];
+                        let cur = ia;
+                        while (cur !== ib && seg.length < m) {
+                            seg.push(core[cur]);
+                            cur = (cur + 1) % m;
+                        }
+                        seg.push(core[ib]);
+                        if (seg.length < 8) return null;
+                        const s0 = Math.max(1, Math.floor(seg.length * 0.20));
+                        const s1 = seg.length - 1 - Math.max(1, Math.floor(seg.length * 0.20));
+                        const mid = seg.slice(s0, Math.max(s0 + 3, s1 + 1));
+                        let sx = 0, sy = 0;
+                        for (let p of mid) { sx += p[0]; sy += p[1]; }
+                        sx /= mid.length; sy /= mid.length;
+                        let sxx = 0, syy = 0, sxy = 0;
+                        for (let p of mid) {
+                            const dx = p[0] - sx, dy = p[1] - sy;
+                            sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+                        }
+                        const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+                        sides.push({ mx: sx, my: sy, ux: Math.cos(ang), uy: Math.sin(ang) });
+                    }
+                    const corners = [];
+                    for (let k = 0; k < 4; k++) {
+                        const L1 = sides[(k + 3) % 4], L2 = sides[k];
+                        const denom = L1.ux * L2.uy - L1.uy * L2.ux;
+                        if (Math.abs(denom) < 0.35) return null;
+                        const dx = L2.mx - L1.mx, dy = L2.my - L1.my;
+                        const t = (dx * L2.uy - dy * L2.ux) / denom;
+                        const ix = L1.mx + t * L1.ux, iy = L1.my + t * L1.uy;
+                        if (Math.hypot(ix - qSimp[k][0], iy - qSimp[k][1]) > 16.0) return null;
+                        corners.push([ix, iy]);
+                    }
+                    corners.push([corners[0][0], corners[0][1]]);
+                    return corners;
+                }
+
+                const activePens = {
+                    blue: document.getElementById('penBlue').checked,
+                    red: document.getElementById('penRed').checked,
+                    green: document.getElementById('penGreen').checked,
+                    black: document.getElementById('penBlack').checked
+                };
+
+                let vecVis = rgbWork.clone();
+                const tracedCurves = [];
+                for (let ch of chains) {
+                    const isOilZig = !ch.isClosed && isTrueOilPastelZigzagJS(ch.points);
+                    const hasInternalCorners = !ch.isClosed && (isOilPastelMode ? isOilZig : (detectSharpCornersJS(ch.points, false, 35.0, 8.0).length >= 1));
+                    const rawPoly = (ch.isClosed || hasInternalCorners) ? ch.points : trimTerminalHooksJS(ch.points, 10.0, 68.0);
+                    if (rawPoly.length < 2) continue;
+                    let poly = (isOilPastelMode && !ch.isClosed && !isOilZig)
+                        ? smoothSpan9pt(smoothSpan9pt(rawPoly))
+                        : smoothChainCornerAwareJS(rawPoly, ch.isClosed, 38.0);
+                    let lenW = 0;
+                    for (let i = 1; i < poly.length; i++) {
+                        lenW += Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]);
+                    }
+                    if (lenW < Math.max(14.0, minSpanPx * 0.65)) continue;
+                    const isSharpZigzag = !ch.isClosed && (isOilPastelMode ? isOilZig : (detectSharpCornersJS(poly, false, 45.0, 8.0).length >= 2));
+                    let simp = rdpSimplify(poly, isSharpZigzag ? (isOilPastelMode ? 6.0 : 3.5) : (ch.isClosed ? 1.8 : (isOilPastelMode ? 1.4 : 1.6)), ch.isClosed);
+                    if (isOilPastelMode) {
+                        if (ch.isClosed) {
+                            const quadPts = projectClosedQuadCornersJS(poly);
+                            if (quadPts) {
+                                simp = quadPts;
+                                poly = densifyPolyline(quadPts, 2.0);
                             }
+                        } else {
+                            if (isSharpZigzag) simp = projectZigzagApexCornersJS(simp, poly);
+                            simp = extendOpenStrokeTipsInMaskJS(simp, cleanData, workW, workH, 7);
+                            poly = extendOpenStrokeTipsInMaskJS(poly, cleanData, workW, workH, 7);
+                        }
+                    }
+                    if (ch.isClosed && simp.length >= 3) {
+                        const first = simp[0], last = simp[simp.length - 1];
+                        if (Math.hypot(first[0] - last[0], first[1] - last[1]) > 1.0) {
+                            simp.push([first[0], first[1]]);
+                        }
+                    }
+                    const chLayer = classifyCurveLayer(poly, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, ch.isClosed);
+                    if (!chLayer) continue;
+                    tracedCurves.push({
+                        workPts: simp,
+                        densePts: poly,
+                        isClosed: ch.isClosed,
+                        layer: chLayer,
+                        lengthPx: lenW * 0.5 * (scaleX + scaleY)
+                    });
+                }
 
-                            function smoothChainCornerAwareJS(pts, isClosed, cornerAngleDeg = 35.0) {
-                                if (pts.length < 7) return pts;
-                                const corners = detectSharpCornersJS(pts, isClosed, cornerAngleDeg, 8.0);
-                                if (corners.length === 0) {
-                                    if (!isClosed) return smoothSpan9pt(pts);
-                                    const core = Math.hypot(pts[pts.length - 1][0] - pts[0][0], pts[pts.length - 1][1] - pts[0][1]) < 2.0 ? pts.slice(0, -1) : pts;
-                                    const m = core.length;
-                                    if (m < 5) return pts;
-                                    const weights = [1, 2, 3, 4, 5, 4, 3, 2, 1];
-                                    const out = [];
-                                    for (let i = 0; i < m; i++) {
-                                        let sx = 0, sy = 0, sw = 0;
-                                        for (let k = -4; k <= 4; k++) {
-                                            const j = (i + k + m) % m;
-                                            const w = weights[k + 4];
-                                            sx += core[j][0] * w;
-                                            sy += core[j][1] * w;
-                                            sw += w;
-                                        }
-                                        out.push([sx / sw, sy / sw]);
-                                    }
-                                    out.push([out[0][0], out[0][1]]);
-                                    return out;
-                                }
-                                if (!isClosed) {
-                                    const out = pts.map(p => [p[0], p[1]]);
-                                    const splits = [0, ...corners.filter(c => c > 0 && c < pts.length - 1), pts.length - 1];
-                                    for (let s = 0; s < splits.length - 1; s++) {
-                                        const a = splits[s], b = splits[s + 1];
-                                        if (b - a >= 4) {
-                                            const sm = smoothSpan9pt(pts.slice(a, b + 1));
-                                            for (let k = 0; k < sm.length; k++) out[a + k] = sm[k];
-                                        }
-                                    }
-                                    return out;
-                                }
-                                const core = Math.hypot(pts[pts.length - 1][0] - pts[0][0], pts[pts.length - 1][1] - pts[0][1]) < 2.0 ? pts.slice(0, -1) : pts;
-                                const m = core.length;
-                                const out = core.map(p => [p[0], p[1]]);
-                                for (let c = 0; c < corners.length; c++) {
-                                    const a = corners[c], b = corners[(c + 1) % corners.length];
-                                    const seg = a < b ? core.slice(a, b + 1) : core.slice(a).concat(core.slice(0, b + 1));
-                                    if (seg.length >= 5) {
-                                        const sm = smoothSpan9pt(seg);
-                                        for (let k = 0; k < sm.length; k++) out[(a + k) % m] = sm[k];
-                                    }
-                                }
-                                out.push([out[0][0], out[0][1]]);
-                                return out;
+                // Check if the midpoint between two endpoints lies inside or within 2px of the stroke mask
+                const hasMaskBridgeJS = (pA, pB) => {
+                    const mx = Math.round(0.5 * (pA[0] + pB[0])), my = Math.round(0.5 * (pA[1] + pB[1]));
+                    for (let dy = -2; dy <= 2; dy++) {
+                        const ny = my + dy;
+                        if (ny < 0 || ny >= workH) continue;
+                        for (let dx = -2; dx <= 2; dx++) {
+                            const nx = mx + dx;
+                            if (nx >= 0 && nx < workW && cleanData[ny * workW + nx] > 0) return true;
+                        }
+                    }
+                    return false;
+                };
+
+                // Merge broken same-color open curves meeting at endpoints (collinear or mask-connected corner)
+                const snapRadius6 = 16.0;
+                let mergedCurves = tracedCurves.slice();
+                let changedMerge = true;
+                while (changedMerge) {
+                    changedMerge = false;
+                    for (let i = 0; i < mergedCurves.length; i++) {
+                        const cA = mergedCurves[i];
+                        if (cA.isClosed || cA.workPts.length < 2) continue;
+                        const nA = cA.workPts.length;
+                        const epA0 = cA.workPts[0], epA1 = cA.workPts[nA - 1];
+                        const kA = Math.min(nA - 1, 6);
+                        const vA1 = [epA1[0] - cA.workPts[nA - 1 - kA][0], epA1[1] - cA.workPts[nA - 1 - kA][1]];
+                        const lA1 = Math.hypot(vA1[0], vA1[1]);
+                        const uA1 = lA1 > 1e-4 ? [vA1[0] / lA1, vA1[1] / lA1] : [1, 0];
+                        const vA0 = [epA0[0] - cA.workPts[kA][0], epA0[1] - cA.workPts[kA][1]];
+                        const lA0 = Math.hypot(vA0[0], vA0[1]);
+                        const uA0 = lA0 > 1e-4 ? [vA0[0] / lA0, vA0[1] / lA0] : [-1, 0];
+
+                        let bestMerge = null, minD = snapRadius6;
+                        for (let j = i + 1; j < mergedCurves.length; j++) {
+                            const cB = mergedCurves[j];
+                            if (cB.isClosed || cB.workPts.length < 2 || cB.layer !== cA.layer) continue;
+                            const nB = cB.workPts.length;
+                            const epB0 = cB.workPts[0], epB1 = cB.workPts[nB - 1];
+                            const kB = Math.min(nB - 1, 6);
+                            const vB0 = [epB0[0] - cB.workPts[kB][0], epB0[1] - cB.workPts[kB][1]];
+                            const lB0 = Math.hypot(vB0[0], vB0[1]);
+                            const uB0 = lB0 > 1e-4 ? [vB0[0] / lB0, vB0[1] / lB0] : [-1, 0];
+                            const vB1 = [epB1[0] - cB.workPts[nB - 1 - kB][0], epB1[1] - cB.workPts[nB - 1 - kB][1]];
+                            const lB1 = Math.hypot(vB1[0], vB1[1]);
+                            const uB1 = lB1 > 1e-4 ? [vB1[0] / lB1, vB1[1] / lB1] : [1, 0];
+
+                            const d11 = Math.hypot(epA1[0] - epB0[0], epA1[1] - epB0[1]);
+                            if (d11 <= minD) {
+                                const dot = uA1[0] * uB0[0] + uA1[1] * uB0[1];
+                                const bridge = [(epB0[0] - epA1[0]) / Math.max(1e-4, d11), (epB0[1] - epA1[1]) / Math.max(1e-4, d11)];
+                                const dotB = uA1[0] * bridge[0] + uA1[1] * bridge[1];
+                                if ((dot <= -0.65 && dotB >= 0.55) || (d11 <= 16.0 && (d11 <= 4.5 || hasMaskBridgeJS(epA1, epB0)) && cA.lengthPx >= 35.0 && cB.lengthPx >= 35.0 && dot <= 0.70)) { minD = d11; bestMerge = { j, mode: 'A1_B0' }; }
                             }
+                            const d10 = Math.hypot(epA1[0] - epB1[0], epA1[1] - epB1[1]);
+                            if (d10 <= minD) {
+                                const dot = uA1[0] * uB1[0] + uA1[1] * uB1[1];
+                                const bridge = [(epB1[0] - epA1[0]) / Math.max(1e-4, d10), (epB1[1] - epA1[1]) / Math.max(1e-4, d10)];
+                                const dotB = uA1[0] * bridge[0] + uA1[1] * bridge[1];
+                                if ((dot <= -0.65 && dotB >= 0.55) || (d10 <= 16.0 && (d10 <= 4.5 || hasMaskBridgeJS(epA1, epB1)) && cA.lengthPx >= 35.0 && cB.lengthPx >= 35.0 && dot <= 0.70)) { minD = d10; bestMerge = { j, mode: 'A1_B1' }; }
+                            }
+                            const d01 = Math.hypot(epA0[0] - epB1[0], epA0[1] - epB1[1]);
+                            if (d01 <= minD) {
+                                const dot = uA0[0] * uB1[0] + uA0[1] * uB1[1];
+                                const bridge = [(epB1[0] - epA0[0]) / Math.max(1e-4, d01), (epB1[1] - epA0[1]) / Math.max(1e-4, d01)];
+                                const dotB = uA0[0] * bridge[0] + uA0[1] * bridge[1];
+                                if ((dot <= -0.65 && dotB >= 0.55) || (d01 <= 16.0 && (d01 <= 4.5 || hasMaskBridgeJS(epA0, epB1)) && cA.lengthPx >= 35.0 && cB.lengthPx >= 35.0 && dot <= 0.70)) { minD = d01; bestMerge = { j, mode: 'A0_B1' }; }
+                            }
+                            const d00 = Math.hypot(epA0[0] - epB0[0], epA0[1] - epB0[1]);
+                            if (d00 <= minD) {
+                                const dot = uA0[0] * uB0[0] + uA0[1] * uB0[1];
+                                const bridge = [(epB0[0] - epA0[0]) / Math.max(1e-4, d00), (epB0[1] - epA0[1]) / Math.max(1e-4, d00)];
+                                const dotB = uA0[0] * bridge[0] + uA0[1] * bridge[1];
+                                if ((dot <= -0.65 && dotB >= 0.55) || (d00 <= 16.0 && (d00 <= 4.5 || hasMaskBridgeJS(epA0, epB0)) && cA.lengthPx >= 35.0 && cB.lengthPx >= 35.0 && dot <= 0.70)) { minD = d00; bestMerge = { j, mode: 'A0_B0' }; }
+                            }
+                        }
+                        if (bestMerge) {
+                            const cB = mergedCurves[bestMerge.j];
+                            let newPtsA = cA.workPts.slice(), newDenseA = (cA.densePts || cA.workPts).slice();
+                            let newPtsB = cB.workPts.slice(), newDenseB = (cB.densePts || cB.workPts).slice();
+                            if (bestMerge.mode === 'A1_B0') {
+                                cA.workPts = newPtsA.concat(newPtsB.slice(1));
+                                cA.densePts = newDenseA.concat(newDenseB);
+                            } else if (bestMerge.mode === 'A1_B1') {
+                                newPtsB.reverse(); newDenseB.reverse();
+                                cA.workPts = newPtsA.concat(newPtsB.slice(1));
+                                cA.densePts = newDenseA.concat(newDenseB);
+                            } else if (bestMerge.mode === 'A0_B1') {
+                                cA.workPts = newPtsB.concat(newPtsA.slice(1));
+                                cA.densePts = newDenseB.concat(newDenseA);
+                            } else if (bestMerge.mode === 'A0_B0') {
+                                newPtsB.reverse(); newDenseB.reverse();
+                                cA.workPts = newPtsB.concat(newPtsA.slice(1));
+                                cA.densePts = newDenseB.concat(newDenseA);
+                            }
+                            const isMergedZigzag = isOilPastelMode ? isTrueOilPastelZigzagJS(cA.densePts) : (detectSharpCornersJS(cA.densePts, false, 45.0, 8.0).length >= 2);
+                            cA.workPts = rdpSimplify(cA.densePts, isMergedZigzag ? (isOilPastelMode ? 6.0 : 3.5) : (isOilPastelMode ? 1.4 : 1.6), false);
+                            if (isOilPastelMode) {
+                                if (isMergedZigzag) cA.workPts = projectZigzagApexCornersJS(cA.workPts, cA.densePts);
+                                cA.workPts = extendOpenStrokeTipsInMaskJS(cA.workPts, cleanData, workW, workH, 7);
+                            }
+                            cA.lengthPx += cB.lengthPx;
+                            mergedCurves.splice(bestMerge.j, 1);
+                            changedMerge = true;
+                            break;
+                        }
+                    }
+                }
+                tracedCurves.length = 0;
+                for (let mc of mergedCurves) tracedCurves.push(mc);
 
-                                const activePens = {
-                                    blue: document.getElementById('penBlue').checked,
-                                    red: document.getElementById('penRed').checked,
-                                    green: document.getElementById('penGreen').checked,
-                                    black: document.getElementById('penBlack').checked
-                                };
+                // Render connected curves to vecVis
+                for (let tc of tracedCurves) {
+                    const simp = tc.workPts;
+                    const chColor = tc.layer === 'score'
+                        ? new cv.Scalar(239, 68, 68)
+                        : (tc.layer === 'crease' ? new cv.Scalar(34, 197, 94) : new cv.Scalar(59, 130, 246));
+                    for (let i = 1; i < simp.length; i++) {
+                        cv.line(vecVis, new cv.Point(Math.round(simp[i - 1][0]), Math.round(simp[i - 1][1])), new cv.Point(Math.round(simp[i][0]), Math.round(simp[i][1])), chColor, 2);
+                    }
+                }
+                showCanvas('6', vecVis, `${tracedCurves.length} Vectorized Curves (Scale: ${scaleX.toFixed(3)}×, Offset: +${roiX},+${roiY})`);
+                addLog(`Stage 6 done. Kept ${tracedCurves.length} curves.`, 'ok');
 
-                                let vecVis = rgbWork.clone();
-                                const tracedCurves = [];
-                                for (let ch of chains) {
-                                    const rawPoly = ch.isClosed ? ch.points : trimTerminalHooksJS(ch.points, 14.0, 45.0);
-                                    if (rawPoly.length < 2) continue;
-                                    const poly = smoothChainCornerAwareJS(rawPoly, ch.isClosed, 35.0);
-                                    let lenW = 0;
-                                    for (let i = 1; i < poly.length; i++) {
-                                        lenW += Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]);
-                                    }
-                                    if (lenW < Math.max(14.0, minSpanPx * 0.65)) continue;
-                                    const simp = rdpSimplify(poly, 1.8, ch.isClosed);
-                                    if (ch.isClosed && simp.length >= 3) {
-                                        const first = simp[0], last = simp[simp.length - 1];
-                                        if (Math.hypot(first[0] - last[0], first[1] - last[1]) > 1.0) {
-                                            simp.push([first[0], first[1]]);
-                                        }
-                                    }
-                                    const chLayer = classifyCurveLayer(poly, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, ch.isClosed);
-                                    if (!chLayer) continue;
-                                    tracedCurves.push({
-                                        workPts: simp,
-                                        densePts: poly,
-                                        isClosed: ch.isClosed,
-                                        layer: chLayer,
-                                        lengthPx: lenW * 0.5 * (scaleX + scaleY)
-                                    });
+                // STAGE 7 & 8: Shape Model Selection, Color Classification & Coordinate Un-scaling to Full Bed
+
+                let fitVis = rgbWork.clone();
+                const fittedCurves = [];
+                const layersData = {
+                    thru_cut: { paths: [], color: '#3b82f6' },
+                    score: { paths: [], color: '#ef4444' },
+                    crease: { paths: [], color: '#22c55e' }
+                };
+
+                let rawFitted = [];
+                try {
+                    for (let tc of tracedCurves) {
+                        if (tc.lengthPx < 18.0) continue;
+                        const samplePts = (tc.densePts && tc.densePts.length > 0) ? tc.densePts : tc.workPts;
+                        const layer = classifyCurveLayer(samplePts, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, tc.isClosed);
+                        if (!layer) continue;
+
+                        const fit = fitGeometricModel(tc.densePts, tc.workPts, tc.isClosed);
+                        // Mean strokeness along curve in zoomed ROI
+                        let sSum = 0;
+                        for (let p of samplePts) {
+                            const ix = Math.min(workW - 1, Math.max(0, Math.round(p[0])));
+                            const iy = Math.min(workH - 1, Math.max(0, Math.round(p[1])));
+                            sSum += satoRes.floatMap[iy * workW + ix];
+                        }
+                        const meanContrast = sSum / samplePts.length;
+
+                        // Reject horizontal cardboard corrugation flutes (faint ridges parallel to cardboard flutes)
+                        if (fit && fit.type === 'line' && fit.workPoints && fit.workPoints.length >= 2) {
+                            const p0 = fit.workPoints[0], p1 = fit.workPoints[fit.workPoints.length - 1];
+                            const dx = Math.abs(p1[0] - p0[0]), dy = Math.abs(p1[1] - p0[1]);
+                            const len = Math.hypot(dx, dy);
+                            if (len < 65.0 && (dy / Math.max(1, len)) < 0.14 && meanContrast < 0.28) {
+                                continue;
+                            }
+                        }
+                        const fitQual = Math.max(0, Math.min(1, 1 - fit.fitError / 6.0));
+                        const conf = 0.3 * fit.inlierRatio + 0.3 * Math.min(fit.coverage / 180, 1) + 0.2 * fitQual + 0.2 * meanContrast;
+                        rawFitted.push({ fit, layer, tc, meanContrast, conf });
+                    }
+
+                    // Geometric Constraint Solver: Endpoint snapping across same-color line & freehand curves
+                    const snapLines = [];
+                    for (let i = 0; i < rawFitted.length; i++) {
+                        const fit = rawFitted[i].fit;
+                        const lyr = rawFitted[i].layer;
+                        if (fit && (fit.type === 'line' || fit.type === 'freehand') && fit.workPoints && fit.workPoints.length >= 2) {
+                            const p0 = fit.workPoints[0], p1 = fit.workPoints[fit.workPoints.length - 1];
+                            const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+                            const len = Math.hypot(dx, dy);
+                            if (len > 1.0) {
+                                snapLines.push({ i, fit, layer: lyr, p0: [p0[0], p0[1]], p1: [p1[0], p1[1]], u: [dx / len, dy / len], len });
+                            }
+                        }
+                    }
+
+                    const maxSnapPx = 14.0;
+                    // 1. Collect all line endpoints
+                    const lineEps = [];
+                    for (let i = 0; i < snapLines.length; i++) {
+                        lineEps.push({ lineIdx: i, ep: 0, pt: snapLines[i].p0 });
+                        lineEps.push({ lineIdx: i, ep: 1, pt: snapLines[i].p1 });
+                    }
+
+                    // 2. Direct mutual-nearest endpoint cluster snapping within maxSnapPx (no transitive chaining)
+                    const adj = Array.from({ length: lineEps.length }, () => []);
+                    for (let a = 0; a < lineEps.length; a++) {
+                        for (let b = a + 1; b < lineEps.length; b++) {
+                            if (lineEps[a].lineIdx === lineEps[b].lineIdx) continue;
+                            if (snapLines[lineEps[a].lineIdx].layer !== snapLines[lineEps[b].lineIdx].layer) continue;
+                            const d = Math.hypot(lineEps[a].pt[0] - lineEps[b].pt[0], lineEps[a].pt[1] - lineEps[b].pt[1]);
+                            if (d <= maxSnapPx && (d <= 5.0 || hasMaskBridgeJS(lineEps[a].pt, lineEps[b].pt))) {
+                                adj[a].push(b);
+                                adj[b].push(a);
+                            }
+                        }
+                    }
+
+                    const visitedEps = new Uint8Array(lineEps.length);
+                    for (let start = 0; start < lineEps.length; start++) {
+                        if (visitedEps[start] || adj[start].length === 0) continue;
+                        const cluster = [start];
+                        visitedEps[start] = 1;
+                        for (let v of adj[start]) {
+                            if (!visitedEps[v]) {
+                                visitedEps[v] = 1;
+                                cluster.push(v);
+                            }
+                        }
+                        if (cluster.length < 2) continue;
+
+                        let sx = 0, sy = 0;
+                        for (let ci of cluster) { sx += lineEps[ci].pt[0]; sy += lineEps[ci].pt[1]; }
+                        let bestVertex = [+(sx / cluster.length).toFixed(1), +(sy / cluster.length).toFixed(1)];
+                        if (cluster.length === 2) {
+                            const ecA = lineEps[cluster[0]], ecB = lineEps[cluster[1]];
+                            const slA = snapLines[ecA.lineIdx], slB = snapLines[ecB.lineIdx];
+                            const ptsA = slA.fit.workPoints, ptsB = slB.fit.workPoints;
+                            const pa1 = ecA.ep === 0 ? ptsA[Math.min(1, ptsA.length - 1)] : ptsA[Math.max(0, ptsA.length - 2)];
+                            const pa2 = ecA.ep === 0 ? ptsA[0] : ptsA[ptsA.length - 1];
+                            const pb1 = ecB.ep === 0 ? ptsB[Math.min(1, ptsB.length - 1)] : ptsB[Math.max(0, ptsB.length - 2)];
+                            const pb2 = ecB.ep === 0 ? ptsB[0] : ptsB[ptsB.length - 1];
+                            const vax = pa2[0] - pa1[0], vay = pa2[1] - pa1[1];
+                            const vbx = pb2[0] - pb1[0], vby = pb2[1] - pb1[1];
+                            const denom = vax * vby - vay * vbx;
+                            const la = Math.hypot(vax, vay), lb = Math.hypot(vbx, vby);
+                            if (la > 1e-3 && lb > 1e-3 && Math.abs(denom) / (la * lb) >= 0.34) {
+                                const t = ((pb1[0] - pa1[0]) * vby - (pb1[1] - pa1[1]) * vbx) / denom;
+                                const ix = pa1[0] + t * vax, iy = pa1[1] + t * vay;
+                                if (Math.hypot(ix - pa2[0], iy - pa2[1]) <= maxSnapPx && Math.hypot(ix - pb2[0], iy - pb2[1]) <= maxSnapPx) {
+                                    bestVertex = [+ix.toFixed(1), +iy.toFixed(1)];
                                 }
+                            }
+                        }
 
-                                // Merge broken same-color open curves meeting at endpoints (collinear or clean zig-zag corner)
-                                const snapRadius6 = 12.0;
-                                let mergedCurves = tracedCurves.slice();
-                                let changedMerge = true;
-                                while (changedMerge) {
-                                    changedMerge = false;
-                                    for (let i = 0; i < mergedCurves.length; i++) {
-                                        const cA = mergedCurves[i];
-                                        if (cA.isClosed || cA.workPts.length < 2) continue;
-                                        const nA = cA.workPts.length;
-                                        const epA0 = cA.workPts[0], epA1 = cA.workPts[nA - 1];
-                                        const kA = Math.min(nA - 1, 6);
-                                        const vA1 = [epA1[0] - cA.workPts[nA - 1 - kA][0], epA1[1] - cA.workPts[nA - 1 - kA][1]];
-                                        const lA1 = Math.hypot(vA1[0], vA1[1]);
-                                        const uA1 = lA1 > 1e-4 ? [vA1[0] / lA1, vA1[1] / lA1] : [1, 0];
-                                        const vA0 = [epA0[0] - cA.workPts[kA][0], epA0[1] - cA.workPts[kA][1]];
-                                        const lA0 = Math.hypot(vA0[0], vA0[1]);
-                                        const uA0 = lA0 > 1e-4 ? [vA0[0] / lA0, vA0[1] / lA0] : [-1, 0];
+                        for (let ci of cluster) {
+                            const ec = lineEps[ci];
+                            const sl = snapLines[ec.lineIdx];
+                            if (ec.ep === 0) {
+                                sl.p0 = bestVertex;
+                                sl.fit.workPoints[0] = bestVertex;
+                                sl.fit.params.x1 = bestVertex[0];
+                                sl.fit.params.y1 = bestVertex[1];
+                            } else {
+                                sl.p1 = bestVertex;
+                                sl.fit.workPoints[sl.fit.workPoints.length - 1] = bestVertex;
+                                sl.fit.params.x2 = bestVertex[0];
+                                sl.fit.params.y2 = bestVertex[1];
+                            }
+                        }
+                    }
 
-                                        let bestMerge = null, minD = snapRadius6;
-                                        for (let j = i + 1; j < mergedCurves.length; j++) {
-                                            const cB = mergedCurves[j];
-                                            if (cB.isClosed || cB.workPts.length < 2 || cB.layer !== cA.layer) continue;
-                                            const nB = cB.workPts.length;
-                                            const epB0 = cB.workPts[0], epB1 = cB.workPts[nB - 1];
-                                            const kB = Math.min(nB - 1, 6);
-                                            const vB0 = [epB0[0] - cB.workPts[kB][0], epB0[1] - cB.workPts[kB][1]];
-                                            const lB0 = Math.hypot(vB0[0], vB0[1]);
-                                            const uB0 = lB0 > 1e-4 ? [vB0[0] / lB0, vB0[1] / lB0] : [-1, 0];
-                                            const vB1 = [epB1[0] - cB.workPts[nB - 1 - kB][0], epB1[1] - cB.workPts[nB - 1 - kB][1]];
-                                            const lB1 = Math.hypot(vB1[0], vB1[1]);
-                                            const uB1 = lB1 > 1e-4 ? [vB1[0] / lB1, vB1[1] / lB1] : [1, 0];
-
-                                            const d11 = Math.hypot(epA1[0] - epB0[0], epA1[1] - epB0[1]);
-                                            if (d11 <= minD) {
-                                                const dot = uA1[0] * uB0[0] + uA1[1] * uB0[1];
-                                                const bridge = [(epB0[0] - epA1[0]) / Math.max(1e-4, d11), (epB0[1] - epA1[1]) / Math.max(1e-4, d11)];
-                                                const dotB = uA1[0] * bridge[0] + uA1[1] * bridge[1];
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d11 <= 8.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d11; bestMerge = { j, mode: 'A1_B0' }; }
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d11 <= 12.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d11; bestMerge = { j, mode: 'A1_B0' }; }
-                                            }
-                                            const d10 = Math.hypot(epA1[0] - epB1[0], epA1[1] - epB1[1]);
-                                            if (d10 <= minD) {
-                                                const dot = uA1[0] * uB1[0] + uA1[1] * uB1[1];
-                                                const bridge = [(epB1[0] - epA1[0]) / Math.max(1e-4, d10), (epB1[1] - epA1[1]) / Math.max(1e-4, d10)];
-                                                const dotB = uA1[0] * bridge[0] + uA1[1] * bridge[1];
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d10 <= 8.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d10; bestMerge = { j, mode: 'A1_B1' }; }
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d10 <= 12.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d10; bestMerge = { j, mode: 'A1_B1' }; }
-                                            }
-                                            const d01 = Math.hypot(epA0[0] - epB1[0], epA0[1] - epB1[1]);
-                                            if (d01 <= minD) {
-                                                const dot = uA0[0] * uB1[0] + uA0[1] * uB1[1];
-                                                const bridge = [(epB1[0] - epA0[0]) / Math.max(1e-4, d01), (epB1[1] - epA0[1]) / Math.max(1e-4, d01)];
-                                                const dotB = uA0[0] * bridge[0] + uA0[1] * bridge[1];
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d01 <= 8.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d01; bestMerge = { j, mode: 'A0_B1' }; }
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d01 <= 12.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d01; bestMerge = { j, mode: 'A0_B1' }; }
-                                            }
-                                            const d00 = Math.hypot(epA0[0] - epB0[0], epA0[1] - epB0[1]);
-                                            if (d00 <= minD) {
-                                                const dot = uA0[0] * uB0[0] + uA0[1] * uB0[1];
-                                                const bridge = [(epB0[0] - epA0[0]) / Math.max(1e-4, d00), (epB0[1] - epA0[1]) / Math.max(1e-4, d00)];
-                                                const dotB = uA0[0] * bridge[0] + uA0[1] * bridge[1];
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d00 <= 8.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d00; bestMerge = { j, mode: 'A0_B0' }; }
-                                                if ((dot <= -0.70 && dotB >= 0.60) || (d00 <= 12.0 && cA.lengthPx >= 25.0 && cB.lengthPx >= 25.0 && dot <= 0.70)) { minD = d00; bestMerge = { j, mode: 'A0_B0' }; }
-                                            }
-                                        }
-                                        if (bestMerge) {
-                                            const cB = mergedCurves[bestMerge.j];
-                                            let newPtsA = cA.workPts.slice(), newDenseA = (cA.densePts || cA.workPts).slice();
-                                            let newPtsB = cB.workPts.slice(), newDenseB = (cB.densePts || cB.workPts).slice();
-                                            if (bestMerge.mode === 'A1_B0') {
-                                                cA.workPts = newPtsA.concat(newPtsB.slice(1));
-                                                cA.densePts = newDenseA.concat(newDenseB);
-                                            } else if (bestMerge.mode === 'A1_B1') {
-                                                newPtsB.reverse(); newDenseB.reverse();
-                                                cA.workPts = newPtsA.concat(newPtsB.slice(1));
-                                                cA.densePts = newDenseA.concat(newDenseB);
-                                            } else if (bestMerge.mode === 'A0_B1') {
-                                                cA.workPts = newPtsB.concat(newPtsA.slice(1));
-                                                cA.densePts = newDenseB.concat(newDenseA);
-                                            } else if (bestMerge.mode === 'A0_B0') {
-                                                newPtsB.reverse(); newDenseB.reverse();
-                                                cA.workPts = newPtsB.concat(newPtsA.slice(1));
-                                                cA.densePts = newDenseB.concat(newDenseA);
-                                            }
-                                            cA.workPts = rdpSimplify(cA.densePts, 1.8, false);
-                                            cA.lengthPx += cB.lengthPx;
-                                            mergedCurves.splice(bestMerge.j, 1);
-                                            changedMerge = true;
+                    // Deduplicate collinear overlapping line segments (prevents muddy brown overlapping lines)
+                    const dedupRawFitted = [];
+                    for (let i = 0; i < rawFitted.length; i++) {
+                        const itemA = rawFitted[i];
+                        if (itemA.fit && itemA.fit.type === 'line' && itemA.fit.workPoints && itemA.fit.workPoints.length >= 2) {
+                            const pA0 = itemA.fit.workPoints[0], pA1 = itemA.fit.workPoints[itemA.fit.workPoints.length - 1];
+                            let duplicate = false;
+                            for (let j = 0; j < dedupRawFitted.length; j++) {
+                                const itemB = dedupRawFitted[j];
+                                if (itemB.fit && itemB.fit.type === 'line' && itemB.fit.workPoints && itemB.fit.workPoints.length >= 2) {
+                                    const pB0 = itemB.fit.workPoints[0], pB1 = itemB.fit.workPoints[itemB.fit.workPoints.length - 1];
+                                    const dDirect = Math.hypot(pA0[0] - pB0[0], pA0[1] - pB0[1]) + Math.hypot(pA1[0] - pB1[0], pA1[1] - pB1[1]);
+                                    const dOpp = Math.hypot(pA0[0] - pB1[0], pA0[1] - pB1[1]) + Math.hypot(pA1[0] - pB0[0], pA1[1] - pB0[1]);
+                                    if (dDirect < 8.0 || dOpp < 8.0) {
+                                        // If one is score (red) and one is crease (green), retain the red score boundary
+                                        if (itemA.layer === 'crease' && itemB.layer === 'score') {
+                                            duplicate = true;
+                                            break;
+                                        } else if (itemA.layer === 'score' && itemB.layer === 'crease') {
+                                            dedupRawFitted[j] = itemA;
+                                            duplicate = true;
+                                            break;
+                                        } else {
+                                            duplicate = true;
                                             break;
                                         }
                                     }
                                 }
-                                tracedCurves.length = 0;
-                                for (let mc of mergedCurves) tracedCurves.push(mc);
-
-                                // Render connected curves to vecVis
-                                for (let tc of tracedCurves) {
-                                    const simp = tc.workPts;
-                                    const chColor = tc.layer === 'score'
-                                        ? new cv.Scalar(239, 68, 68)
-                                        : (tc.layer === 'crease' ? new cv.Scalar(34, 197, 94) : new cv.Scalar(59, 130, 246));
-                                    for (let i = 1; i < simp.length; i++) {
-                                        cv.line(vecVis, new cv.Point(Math.round(simp[i - 1][0]), Math.round(simp[i - 1][1])), new cv.Point(Math.round(simp[i][0]), Math.round(simp[i][1])), chColor, 2);
-                                    }
-                                }
-                                showCanvas('6', vecVis, `${tracedCurves.length} Vectorized Curves (Scale: ${scaleX.toFixed(3)}×, Offset: +${roiX},+${roiY})`);
-                                addLog(`Stage 6 done. Kept ${tracedCurves.length} curves.`, 'ok');
-
-                                // STAGE 7 & 8: Shape Model Selection, Color Classification & Coordinate Un-scaling to Full Bed
-
-                                let fitVis = rgbWork.clone();
-                                const fittedCurves = [];
-                                const layersData = {
-                                    thru_cut: { paths: [], color: '#3b82f6' },
-                                    score: { paths: [], color: '#ef4444' },
-                                    crease: { paths: [], color: '#22c55e' }
-                                };
-
-                                let rawFitted = [];
-                                try {
-                                    for (let tc of tracedCurves) {
-                                        if (tc.lengthPx < 18.0) continue;
-                                        const samplePts = (tc.densePts && tc.densePts.length > 0) ? tc.densePts : tc.workPts;
-                                        const layer = classifyCurveLayer(samplePts, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, tc.isClosed);
-                                        if (!layer) continue;
-
-                                        const fit = fitGeometricModel(tc.densePts, tc.workPts, tc.isClosed);
-                                        // Mean strokeness along curve in zoomed ROI
-                                        let sSum = 0;
-                                        for (let p of samplePts) {
-                                            const ix = Math.min(workW - 1, Math.max(0, Math.round(p[0])));
-                                            const iy = Math.min(workH - 1, Math.max(0, Math.round(p[1])));
-                                            sSum += satoRes.floatMap[iy * workW + ix];
-                                        }
-                                        const meanContrast = sSum / samplePts.length;
-
-                                        // Reject horizontal cardboard corrugation flutes (faint ridges parallel to cardboard flutes)
-                                        if (fit && fit.type === 'line' && fit.workPoints && fit.workPoints.length >= 2) {
-                                            const p0 = fit.workPoints[0], p1 = fit.workPoints[fit.workPoints.length - 1];
-                                            const dx = Math.abs(p1[0] - p0[0]), dy = Math.abs(p1[1] - p0[1]);
-                                            const len = Math.hypot(dx, dy);
-                                            if (len < 65.0 && (dy / Math.max(1, len)) < 0.14 && meanContrast < 0.28) {
-                                                continue;
-                                            }
-                                        }
-                                        const fitQual = Math.max(0, Math.min(1, 1 - fit.fitError / 6.0));
-                                        const conf = 0.3 * fit.inlierRatio + 0.3 * Math.min(fit.coverage / 180, 1) + 0.2 * fitQual + 0.2 * meanContrast;
-                                        rawFitted.push({ fit, layer, tc, meanContrast, conf });
-                                    }
-
-                                    // Geometric Constraint Solver: Line ray intersection & vertex snapping (eliminates arrow & corner gaps)
-                                    const snapLines = [];
-                                    for (let i = 0; i < rawFitted.length; i++) {
-                                        const fit = rawFitted[i].fit;
-                                        if (fit && fit.type === 'line' && fit.workPoints && fit.workPoints.length >= 2) {
-                                            const p0 = fit.workPoints[0], p1 = fit.workPoints[fit.workPoints.length - 1];
-                                            const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
-                                            const len = Math.hypot(dx, dy);
-                                            if (len > 1.0) {
-                                                snapLines.push({ i, fit, p0: [p0[0], p0[1]], p1: [p1[0], p1[1]], u: [dx / len, dy / len], len });
-                                            }
-                                        }
-                                    }
-
-                                    const maxSnapPx = 12.0;
-                                    // 1. Collect all line endpoints
-                                    const lineEps = [];
-                                    for (let i = 0; i < snapLines.length; i++) {
-                                        lineEps.push({ lineIdx: i, ep: 0, pt: snapLines[i].p0 });
-                                        lineEps.push({ lineIdx: i, ep: 1, pt: snapLines[i].p1 });
-                                    }
-
-                                    // 2. Direct mutual-nearest endpoint cluster snapping within maxSnapPx (no transitive chaining)
-                                    const adj = Array.from({ length: lineEps.length }, () => []);
-                                    for (let a = 0; a < lineEps.length; a++) {
-                                        for (let b = a + 1; b < lineEps.length; b++) {
-                                            if (lineEps[a].lineIdx === lineEps[b].lineIdx) continue;
-                                            const d = Math.hypot(lineEps[a].pt[0] - lineEps[b].pt[0], lineEps[a].pt[1] - lineEps[b].pt[1]);
-                                            if (d <= maxSnapPx) {
-                                                adj[a].push(b);
-                                                adj[b].push(a);
-                                            }
-                                        }
-                                    }
-
-                                    const visitedEps = new Uint8Array(lineEps.length);
-                                    for (let start = 0; start < lineEps.length; start++) {
-                                        if (visitedEps[start] || adj[start].length === 0) continue;
-                                        const cluster = [start];
-                                        visitedEps[start] = 1;
-                                        for (let v of adj[start]) {
-                                            if (!visitedEps[v]) {
-                                                visitedEps[v] = 1;
-                                                cluster.push(v);
-                                            }
-                                        }
-                                        if (cluster.length < 2) continue;
-
-                                        let sx = 0, sy = 0;
-                                        for (let ci of cluster) { sx += lineEps[ci].pt[0]; sy += lineEps[ci].pt[1]; }
-                                        const bestVertex = [+(sx / cluster.length).toFixed(1), +(sy / cluster.length).toFixed(1)];
-
-                                        for (let ci of cluster) {
-                                            const ec = lineEps[ci];
-                                            const sl = snapLines[ec.lineIdx];
-                                            if (ec.ep === 0) {
-                                                sl.p0 = bestVertex;
-                                                sl.fit.workPoints[0] = bestVertex;
-                                                sl.fit.params.x1 = bestVertex[0];
-                                                sl.fit.params.y1 = bestVertex[1];
-                                            } else {
-                                                sl.p1 = bestVertex;
-                                                sl.fit.workPoints[sl.fit.workPoints.length - 1] = bestVertex;
-                                                sl.fit.params.x2 = bestVertex[0];
-                                                sl.fit.params.y2 = bestVertex[1];
-                                            }
-                                        }
-                                    }
-
-                                    // Deduplicate collinear overlapping line segments (prevents muddy brown overlapping lines)
-                                    const dedupRawFitted = [];
-                                    for (let i = 0; i < rawFitted.length; i++) {
-                                        const itemA = rawFitted[i];
-                                        if (itemA.fit && itemA.fit.type === 'line' && itemA.fit.workPoints && itemA.fit.workPoints.length >= 2) {
-                                            const pA0 = itemA.fit.workPoints[0], pA1 = itemA.fit.workPoints[itemA.fit.workPoints.length - 1];
-                                            let duplicate = false;
-                                            for (let j = 0; j < dedupRawFitted.length; j++) {
-                                                const itemB = dedupRawFitted[j];
-                                                if (itemB.fit && itemB.fit.type === 'line' && itemB.fit.workPoints && itemB.fit.workPoints.length >= 2) {
-                                                    const pB0 = itemB.fit.workPoints[0], pB1 = itemB.fit.workPoints[itemB.fit.workPoints.length - 1];
-                                                    const dDirect = Math.hypot(pA0[0] - pB0[0], pA0[1] - pB0[1]) + Math.hypot(pA1[0] - pB1[0], pA1[1] - pB1[1]);
-                                                    const dOpp = Math.hypot(pA0[0] - pB1[0], pA0[1] - pB1[1]) + Math.hypot(pA1[0] - pB0[0], pA1[1] - pB0[1]);
-                                                    if (dDirect < 8.0 || dOpp < 8.0) {
-                                                        // If one is score (red) and one is crease (green), retain the red score boundary
-                                                        if (itemA.layer === 'crease' && itemB.layer === 'score') {
-                                                            duplicate = true;
-                                                            break;
-                                                        } else if (itemA.layer === 'score' && itemB.layer === 'crease') {
-                                                            dedupRawFitted[j] = itemA;
-                                                            duplicate = true;
-                                                            break;
-                                                        } else {
-                                                            duplicate = true;
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            if (duplicate) continue;
-                                        }
-                                        dedupRawFitted.push(itemA);
-                                    }
-                                    rawFitted = dedupRawFitted;
-                                } catch (snapErr) {
-                                    addLog('Warning in snap solver: ' + snapErr.message, 'warn');
-                                }
-
-                                for (let item of rawFitted) {
-                                    const { fit, layer, tc, meanContrast, conf } = item;
-                                    if (!fit || !fit.workPoints) continue;
-                                    // Map coordinates from zoomed ROI working space -> full ArUco bed space
-                                    const bedPts = fit.workPoints.map(p => [
-                                        +(p[0] * scaleX + roiX).toFixed(2),
-                                        +(p[1] * scaleY + roiY).toFixed(2)
-                                    ]);
-
-                                    const drawScalar = layer === 'score'
-                                        ? new cv.Scalar(239, 68, 68)
-                                        : (layer === 'crease' ? new cv.Scalar(34, 197, 94) : new cv.Scalar(59, 130, 246));
-
-                                    let bedParams = { ...(fit.params || {}), layer };
-                                    if (fit.type === 'circle') {
-                                        const bedCx = +(fit.params.cx * scaleX + roiX).toFixed(2);
-                                        const bedCy = +(fit.params.cy * scaleY + roiY).toFixed(2);
-                                        const bedR = +(fit.params.r * 0.5 * (scaleX + scaleY)).toFixed(2);
-                                        bedParams = { cx: bedCx, cy: bedCy, r: bedR, layer };
-                                        cv.circle(fitVis, new cv.Point(Math.round(fit.params.cx), Math.round(fit.params.cy)), Math.round(fit.params.r), drawScalar, 2);
-                                        layersData[layer].paths.push({ type: 'circle', cx: bedCx, cy: bedCy, r: bedR });
-                                    } else if (fit.type === 'ellipse') {
-                                        const bedCx = +(fit.params.cx * scaleX + roiX).toFixed(2);
-                                        const bedCy = +(fit.params.cy * scaleY + roiY).toFixed(2);
-                                        const bedRx = +(fit.params.rx * scaleX).toFixed(2);
-                                        const bedRy = +(fit.params.ry * scaleY).toFixed(2);
-                                        bedParams = { cx: bedCx, cy: bedCy, rx: bedRx, ry: bedRy, angle_deg: fit.params.angle_deg, layer };
-                                        layersData[layer].paths.push({ type: 'ellipse', cx: bedCx, cy: bedCy, rx: bedRx, ry: bedRy, angle_deg: fit.params.angle_deg });
-                                        for (let i = 1; i < fit.workPoints.length; i++) {
-                                            cv.line(fitVis,
-                                                new cv.Point(Math.round(fit.workPoints[i - 1][0]), Math.round(fit.workPoints[i - 1][1])),
-                                                new cv.Point(Math.round(fit.workPoints[i][0]), Math.round(fit.workPoints[i][1])),
-                                                drawScalar, 2);
-                                        }
-                                    } else {
-                                        if (fit.type === 'line' && bedPts.length >= 2) {
-                                            bedParams = {
-                                                x1: bedPts[0][0], y1: bedPts[0][1],
-                                                x2: bedPts[bedPts.length - 1][0], y2: bedPts[bedPts.length - 1][1],
-                                                layer
-                                            };
-                                        }
-                                        layersData[layer].paths.push({ type: 'path', points: bedPts });
-                                        for (let i = 1; i < fit.workPoints.length; i++) {
-                                            cv.line(fitVis,
-                                                new cv.Point(Math.round(fit.workPoints[i - 1][0]), Math.round(fit.workPoints[i - 1][1])),
-                                                new cv.Point(Math.round(fit.workPoints[i][0]), Math.round(fit.workPoints[i][1])),
-                                                drawScalar, 2);
-                                        }
-                                    }
-
-                                    fittedCurves.push({
-                                        type: fit.type,
-                                        layer: layer,
-                                        params: bedParams,
-                                        points: bedPts,
-                                        length_px: +(tc ? tc.lengthPx.toFixed(1) : 0),
-                                        mean_contrast: +meanContrast.toFixed(3),
-                                        fit_error_px: +((fit.fitError || 0) * 0.5 * (scaleX + scaleY)).toFixed(2),
-                                        confidence: +conf.toFixed(3)
-                                    });
-                                }
-                                showCanvas('7', fitVis, `Fitted on Zoomed ROI (${fittedCurves.length} curves: ${fittedCurves.map(c => c.type + ':' + c.layer).join(', ') || 'none'})`);
-                                addLog(`[Stage 7 Fitted] ${fittedCurves.length} curves:`, 'info');
-                                fittedCurves.forEach((c, idx) => {
-                                    const p0 = c.points && c.points.length ? c.points[0] : [0, 0];
-                                    const p1 = c.points && c.points.length ? c.points[c.points.length - 1] : [0, 0];
-                                    addLog(`  fit[${idx}] layer=${c.layer} type=${c.type} len=${c.length_px}px start=(${p0[0]},${p0[1]}) end=(${p1[0]},${p1[1]}) err=${c.fit_error_px}px`, 'info');
-                                });
-
-                                const maxConf = fittedCurves.length ? Math.max(...fittedCurves.map(c => c.confidence)) : 0;
-                                const status = maxConf >= 0.45 && fittedCurves.length > 0 ? 'detected' : 'not_detected';
-                                const valBody = document.querySelector('#step-8 .step-body');
-                                valBody.innerHTML = `<div class="step-meta">Status: <strong>${status}</strong> | Max Confidence: <strong>${maxConf.toFixed(3)}</strong> | Bed Offset: (${roiX}, ${roiY})\n` +
-                                    fittedCurves.map((c, i) => `#${i + 1} [${c.type} / ${c.layer}] conf=${c.confidence} err=${c.fit_error_px}px contrast=${c.mean_contrast} len=${c.length_px}px`).join('\n') +
-                                    `</div>`;
-                                setStep('8', true);
-
-                                // STAGE 9: Final 4-Layer SVG & JSON Output (Scaled to Full Bed in mm)
-                                const cardboardPolyBed = [
-                                    [roiX, roiY],
-                                    [roiX + roiW, roiY],
-                                    [roiX + roiW, roiY + roiH],
-                                    [roiX, roiY + roiH]
-                                ];
-                                const svgResult = SvgGenerator.generateLayeredSvg(layersData, fullBedW, fullBedH, frameConfig, cardboardPolyBed);
-                                const svgBody = document.querySelector('#step-9 .step-body');
-                                svgBody.innerHTML = svgResult.svg;
-                                const jsonMeta = document.createElement('div');
-                                jsonMeta.className = 'step-meta';
-                                jsonMeta.textContent = `${fittedCurves.length} curves | 4 Layers (bed, red, green, blue) | Full Bed: ${svgResult.meta.physical_width}×${svgResult.meta.physical_height} mm (${svgResult.meta.dots_per_mm.toFixed(2)} px/mm)`;
-                                svgBody.appendChild(jsonMeta);
-                                setStep('9', true);
-
-                                // STAGE 10: Full-Resolution QC Overlay (50% Opacity on Flattened ROI Photo)
-                                let qcBase = rgbRoi.clone();
-                                let qcDraw = rgbRoi.clone();
-                                cv.rectangle(qcDraw, new cv.Point(2, 2), new cv.Point(roiW - 3, roiH - 3), new cv.Scalar(136, 136, 136), 2);
-                                for (let c of fittedCurves) {
-                                    const col = (c.layer === 'score' || c.layer === 'red')
-                                        ? new cv.Scalar(229, 57, 53)
-                                        : ((c.layer === 'crease' || c.layer === 'green') ? new cv.Scalar(67, 160, 71) : new cv.Scalar(30, 136, 229));
-                                    if (c.type === 'circle' && c.params && c.params.r) {
-                                        cv.circle(qcDraw, new cv.Point(Math.round(c.params.cx - roiX), Math.round(c.params.cy - roiY)), Math.round(c.params.r), col, 3);
-                                    } else if (c.points && c.points.length >= 2) {
-                                        for (let k = 1; k < c.points.length; k++) {
-                                            cv.line(qcDraw,
-                                                new cv.Point(Math.round(c.points[k - 1][0] - roiX), Math.round(c.points[k - 1][1] - roiY)),
-                                                new cv.Point(Math.round(c.points[k][0] - roiX), Math.round(c.points[k][1] - roiY)),
-                                                col, 3);
-                                        }
-                                    }
-                                }
-                                let qcBlend = new cv.Mat();
-                                cv.addWeighted(qcBase, 0.5, qcDraw, 0.5, 0.0, qcBlend);
-                                showCanvas('10', qcBlend, `Full-Resolution QC Overlay (${roiW}×${roiH} px, 50% Opacity, ${fittedCurves.length} strokes)`);
-                                qcBase.delete(); qcDraw.delete(); qcBlend.delete();
-
-                                addLog(`Stage 9 done. Status=${status}, Curves=${fittedCurves.length}, Confidence=${maxConf.toFixed(3)}`, 'ok');
-
-                                // Cleanup
-                                src.delete(); workImg.delete(); roiCropMat.delete(); roiMaskCrop.delete();
-                                grayRoi.delete(); rgbRoi.delete(); labRoi.delete();
-                                lRoi.delete(); aRoi.delete(); bRoi.delete(); labPlanes.delete();
-                                ignoreMask.delete(); lWork.delete(); aWork.delete(); bWork.delete();
-                                ignoreWork.delete(); rgbWork.delete(); flatBi.delete(); satoMat.delete();
-                                bgAMat.delete(); bgBMat.delete();
-                                hystMat.delete(); cleanMask.delete(); skelVis.delete(); vecVis.delete(); fitVis.delete();
-                            } catch (err) {
-                                addLog('ERROR: ' + err.message, 'err');
-                                console.error(err);
                             }
-                            document.getElementById('btnRun').disabled = false;
-                        });
+                            if (duplicate) continue;
+                        }
+                        dedupRawFitted.push(itemA);
+                    }
+                    rawFitted = dedupRawFitted;
+                } catch (snapErr) {
+                    addLog('Warning in snap solver: ' + snapErr.message, 'warn');
+                }
+
+                for (let item of rawFitted) {
+                    const { fit, layer, tc, meanContrast, conf } = item;
+                    if (!fit || !fit.workPoints) continue;
+                    // Map coordinates from zoomed ROI working space -> full ArUco bed space
+                    const bedPts = fit.workPoints.map(p => [
+                        +(p[0] * scaleX + roiX).toFixed(2),
+                        +(p[1] * scaleY + roiY).toFixed(2)
+                    ]);
+
+                    const drawScalar = layer === 'score'
+                        ? new cv.Scalar(239, 68, 68)
+                        : (layer === 'crease' ? new cv.Scalar(34, 197, 94) : new cv.Scalar(59, 130, 246));
+
+                    let bedParams = { ...(fit.params || {}), layer };
+                    if (fit.type === 'circle') {
+                        const bedCx = +(fit.params.cx * scaleX + roiX).toFixed(2);
+                        const bedCy = +(fit.params.cy * scaleY + roiY).toFixed(2);
+                        const bedR = +(fit.params.r * 0.5 * (scaleX + scaleY)).toFixed(2);
+                        bedParams = { cx: bedCx, cy: bedCy, r: bedR, layer };
+                        cv.circle(fitVis, new cv.Point(Math.round(fit.params.cx), Math.round(fit.params.cy)), Math.round(fit.params.r), drawScalar, 2);
+                        layersData[layer].paths.push({ type: 'circle', cx: bedCx, cy: bedCy, r: bedR });
+                    } else if (fit.type === 'ellipse') {
+                        const bedCx = +(fit.params.cx * scaleX + roiX).toFixed(2);
+                        const bedCy = +(fit.params.cy * scaleY + roiY).toFixed(2);
+                        const bedRx = +(fit.params.rx * scaleX).toFixed(2);
+                        const bedRy = +(fit.params.ry * scaleY).toFixed(2);
+                        bedParams = { cx: bedCx, cy: bedCy, rx: bedRx, ry: bedRy, angle_deg: fit.params.angle_deg, layer };
+                        layersData[layer].paths.push({ type: 'ellipse', cx: bedCx, cy: bedCy, rx: bedRx, ry: bedRy, angle_deg: fit.params.angle_deg });
+                        for (let i = 1; i < fit.workPoints.length; i++) {
+                            cv.line(fitVis,
+                                new cv.Point(Math.round(fit.workPoints[i - 1][0]), Math.round(fit.workPoints[i - 1][1])),
+                                new cv.Point(Math.round(fit.workPoints[i][0]), Math.round(fit.workPoints[i][1])),
+                                drawScalar, 2);
+                        }
+                    } else {
+                        if (fit.type === 'line' && bedPts.length >= 2) {
+                            bedParams = {
+                                x1: bedPts[0][0], y1: bedPts[0][1],
+                                x2: bedPts[bedPts.length - 1][0], y2: bedPts[bedPts.length - 1][1],
+                                layer
+                            };
+                        }
+                        layersData[layer].paths.push({ type: 'path', points: bedPts });
+                        for (let i = 1; i < fit.workPoints.length; i++) {
+                            cv.line(fitVis,
+                                new cv.Point(Math.round(fit.workPoints[i - 1][0]), Math.round(fit.workPoints[i - 1][1])),
+                                new cv.Point(Math.round(fit.workPoints[i][0]), Math.round(fit.workPoints[i][1])),
+                                drawScalar, 2);
+                        }
+                    }
+
+                    fittedCurves.push({
+                        type: fit.type,
+                        layer: layer,
+                        params: bedParams,
+                        points: bedPts,
+                        length_px: +(tc ? tc.lengthPx.toFixed(1) : 0),
+                        mean_contrast: +meanContrast.toFixed(3),
+                        fit_error_px: +((fit.fitError || 0) * 0.5 * (scaleX + scaleY)).toFixed(2),
+                        confidence: +conf.toFixed(3)
+                    });
+                }
+                showCanvas('7', fitVis, `Fitted on Zoomed ROI (${fittedCurves.length} curves: ${fittedCurves.map(c => c.type + ':' + c.layer).join(', ') || 'none'})`);
+                addLog(`[Stage 7 Fitted] ${fittedCurves.length} curves:`, 'info');
+                fittedCurves.forEach((c, idx) => {
+                    const p0 = c.points && c.points.length ? c.points[0] : [0, 0];
+                    const p1 = c.points && c.points.length ? c.points[c.points.length - 1] : [0, 0];
+                    addLog(`  fit[${idx}] layer=${c.layer} type=${c.type} len=${c.length_px}px start=(${p0[0]},${p0[1]}) end=(${p1[0]},${p1[1]}) err=${c.fit_error_px}px`, 'info');
+                });
+
+                const maxConf = fittedCurves.length ? Math.max(...fittedCurves.map(c => c.confidence)) : 0;
+                const status = maxConf >= 0.45 && fittedCurves.length > 0 ? 'detected' : 'not_detected';
+                const valBody = document.querySelector('#step-8 .step-body');
+                valBody.innerHTML = `<div class="step-meta">Status: <strong>${status}</strong> | Max Confidence: <strong>${maxConf.toFixed(3)}</strong> | Bed Offset: (${roiX}, ${roiY})\n` +
+                    fittedCurves.map((c, i) => `#${i + 1} [${c.type} / ${c.layer}] conf=${c.confidence} err=${c.fit_error_px}px contrast=${c.mean_contrast} len=${c.length_px}px`).join('\n') +
+                    `</div>`;
+                setStep('8', true);
+
+                // STAGE 9: Final 4-Layer SVG & JSON Output (Scaled to Full Bed in mm)
+                const cardboardPolyBed = [
+                    [roiX, roiY],
+                    [roiX + roiW, roiY],
+                    [roiX + roiW, roiY + roiH],
+                    [roiX, roiY + roiH]
+                ];
+                const svgResult = SvgGenerator.generateLayeredSvg(layersData, fullBedW, fullBedH, frameConfig, cardboardPolyBed);
+                const svgBody = document.querySelector('#step-9 .step-body');
+                svgBody.innerHTML = svgResult.svg;
+                const jsonMeta = document.createElement('div');
+                jsonMeta.className = 'step-meta';
+                jsonMeta.textContent = `${fittedCurves.length} curves | 4 Layers (bed, red, green, blue) | Full Bed: ${svgResult.meta.physical_width}×${svgResult.meta.physical_height} mm (${svgResult.meta.dots_per_mm.toFixed(2)} px/mm)`;
+                svgBody.appendChild(jsonMeta);
+                setStep('9', true);
+
+                // STAGE 10: Full-Resolution QC Overlay (50% Opacity on Flattened ROI Photo)
+                let qcBase = rgbRoi.clone();
+                let qcDraw = rgbRoi.clone();
+                cv.rectangle(qcDraw, new cv.Point(2, 2), new cv.Point(roiW - 3, roiH - 3), new cv.Scalar(136, 136, 136), 2);
+                for (let c of fittedCurves) {
+                    const col = (c.layer === 'score' || c.layer === 'red')
+                        ? new cv.Scalar(244, 63, 94)
+                        : ((c.layer === 'crease' || c.layer === 'green') ? new cv.Scalar(34, 197, 94) : new cv.Scalar(56, 189, 248));
+                    const hiCol = (c.layer === 'score' || c.layer === 'red')
+                        ? new cv.Scalar(255, 210, 220)
+                        : ((c.layer === 'crease' || c.layer === 'green') ? new cv.Scalar(210, 255, 210) : new cv.Scalar(210, 245, 255));
+                    if (c.type === 'circle' && c.params && c.params.r) {
+                        cv.circle(qcDraw, new cv.Point(Math.round(c.params.cx - roiX), Math.round(c.params.cy - roiY)), Math.round(c.params.r), col, 3);
+                        cv.circle(qcDraw, new cv.Point(Math.round(c.params.cx - roiX), Math.round(c.params.cy - roiY)), Math.round(c.params.r), hiCol, 1);
+                    } else if (c.points && c.points.length >= 2) {
+                        for (let k = 1; k < c.points.length; k++) {
+                            const ptA = new cv.Point(Math.round(c.points[k - 1][0] - roiX), Math.round(c.points[k - 1][1] - roiY));
+                            const ptB = new cv.Point(Math.round(c.points[k][0] - roiX), Math.round(c.points[k][1] - roiY));
+                            cv.line(qcDraw, ptA, ptB, col, 3);
+                            cv.line(qcDraw, ptA, ptB, hiCol, 1);
+                        }
+                    }
+                }
+                let qcBlend = new cv.Mat();
+                cv.addWeighted(qcBase, 0.5, qcDraw, 0.5, 0.0, qcBlend);
+                showCanvas('10', qcBlend, `Full-Resolution QC Overlay (${roiW}×${roiH} px, 50% Opacity, ${fittedCurves.length} strokes)`);
+                qcBase.delete(); qcDraw.delete(); qcBlend.delete();
+
+                addLog(`Stage 9 done. Status=${status}, Curves=${fittedCurves.length}, Confidence=${maxConf.toFixed(3)}`, 'ok');
+
+                // Cleanup
+                src.delete(); workImg.delete(); roiCropMat.delete(); roiMaskCrop.delete();
+                grayRoi.delete(); rgbRoi.delete(); labRoi.delete();
+                lRoi.delete(); aRoi.delete(); bRoi.delete(); labPlanes.delete();
+                ignoreMask.delete(); lWork.delete(); aWork.delete(); bWork.delete();
+                ignoreWork.delete(); rgbWork.delete(); flatBi.delete(); satoMat.delete();
+                bgAMat.delete(); bgBMat.delete();
+                hystMat.delete(); cleanMask.delete(); skelVis.delete(); vecVis.delete(); fitVis.delete();
+            } catch (err) {
+                addLog('ERROR: ' + err.message, 'err');
+                console.error(err);
+            }
+            document.getElementById('btnRun').disabled = false;
+        });
     </script>
 </body>
 
