@@ -1098,7 +1098,8 @@
             const normU8 = new Uint8Array(rows * cols);
             const isPureTexture = maxVal < 0.22 || (maxVal < 8.0 && snr95 < 3.6 && snr80 < 22.0 && snr70 < 32.0);
             if (!isPureTexture) {
-                const normDenom = Math.max(1e-6, Math.max(p995, maxVal * 0.72));
+                const robustMax = p999 > 0 ? Math.min(maxVal, p999 * 1.15) : maxVal;
+                const normDenom = Math.max(1e-6, Math.max(p995, robustMax * 0.72));
                 const flatData = flatMat.data32F;
                 for (let i = 0; i < outMax.length; i++) {
                     if (ignoreMaskU8[i] > 0) continue;
@@ -2288,10 +2289,11 @@
         }
 
         // Robust multi-space color classification combining RGB channel absorption with CIE LAB
-        function classifyCurveLayer(workPts, lWorkMat, aWorkMat, bWorkMat, rgbWorkMat, bgAMat, bgBMat, medA, medB, activePens, isClosed = false) {
+        function classifyCurveLayer(workPts, lWorkMat, aWorkMat, bWorkMat, rgbWorkMat, bgLMat, bgAMat, bgBMat, medL, medA, medB, activePens, isClosed = false, minBlackDarkness = 11.5) {
             const cols = aWorkMat.cols, rows = aWorkMat.rows;
             const lData = lWorkMat.data, aData = aWorkMat.data, bData = bWorkMat.data;
             const rgbData = rgbWorkMat ? rgbWorkMat.data : null;
+            const bgLData = bgLMat ? bgLMat.data : null;
             const bgAData = bgAMat ? bgAMat.data : null;
             const bgBData = bgBMat ? bgBMat.data : null;
             let votes = { red: 0, green: 0, blue: 0, black: 0 };
@@ -2329,8 +2331,10 @@
                 }
                 nSamples++;
 
+                const localL = bgLData ? bgLData[bestIdx] : medL;
                 const localA = bgAData ? bgAData[bestIdx] : medA;
                 const localB = bgBData ? bgBData[bestIdx] : medB;
+                const dL = 0.5 * (localL - minL) + 0.5 * (medL - minL);
                 const da = 0.5 * (aData[bestIdx] - localA) + 0.5 * (aData[bestIdx] - medA);
                 const db = 0.5 * (bData[bestIdx] - localB) + 0.5 * (bData[bestIdx] - medB);
 
@@ -2355,16 +2359,14 @@
                     votes.blue++;
                 } else if (isRgbGreen || ((deg >= 125.0 && deg <= 235.0) && da <= -2.0 && cMag >= 3.5)) {
                     votes.green++;
-                } else {
+                } else if (dL >= minBlackDarkness) {
                     votes.black++;
                 }
             }
 
-            const total = Math.max(1, nSamples);
-            const totalInk = votes.red + votes.green + votes.blue;
-            if (totalInk < Math.max(2, Math.floor(nSamples * 0.22))) {
-                return null;
-            }
+            const minColorVotes = Math.max(2, Math.floor(nSamples * 0.22));
+            const minBlackVotes = Math.max(3, Math.floor(nSamples * 0.35));
+            const totalColorInk = votes.red + votes.green + votes.blue;
 
             let dominant = null;
             const penCandidates = [
@@ -2375,12 +2377,10 @@
             const activeCandidates = penCandidates.filter(p => activePens[p.name]);
             activeCandidates.sort((a, b) => b.count - a.count);
 
-            if (activeCandidates.length > 0 && activeCandidates[0].count > 0) {
+            if (totalColorInk >= minColorVotes && activeCandidates.length > 0 && activeCandidates[0].count > 0) {
                 dominant = activeCandidates[0].layer;
-            } else if (activePens.black && votes.black > 0) {
+            } else if (activePens.black && votes.black >= minBlackVotes && totalColorInk < minColorVotes) {
                 dominant = 'thru_cut';
-            } else {
-                dominant = null;
             }
 
             return dominant;
@@ -2820,21 +2820,23 @@
                 const closeKernelSize = (isOilPastelMode || isHighFluteNoiseMode) ? 3 : (Math.max(3, parseInt(document.getElementById('closeKernelSize')?.value || '5', 10) | 1));
                 let pHigh = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * highPct / 100))] : 0.22;
                 let pLow = validStrokeness.length ? validStrokeness[Math.min(validStrokeness.length - 1, Math.floor(validStrokeness.length * lowPct / 100))] : 0.06;
-                // Cap highVal relative to 80th-percentile background floor when dense strokes cover >5% of the ROI (p95 > 2.8 * p80)
-                if (p80 > 0.01 && p95 > 2.8 * p80) {
+                // Cap highVal relative to 80th-percentile background floor when dense strokes cover >5% of the ROI, even on smooth cardboard (p80 <= 0.01)
+                if (p95 > Math.max(0.10, 2.8 * p80)) {
                     pHigh = Math.min(pHigh, Math.max(0.24, 4.2 * p80));
                     pLow = isHighFluteNoiseMode
                         ? Math.max(0.07, Math.min(0.13, 1.9 * p80))
-                        : Math.max(0.05, Math.min(0.07, 1.5 * p80));
+                        : Math.max(0.05, Math.min(0.07, Math.max(0.06, 1.5 * p80)));
                 }
-                const highVal = isOilPastelMode ? 0.36 : Math.max(0.18, pHigh);
+                const highVal = isOilPastelMode ? 0.36 : Math.min(0.45, Math.max(0.18, pHigh));
                 const lowVal = isOilPastelMode
                     ? 0.20
                     : (isHighFluteNoiseMode ? pLow : Math.max(0.06, Math.min(0.07, Math.min(highVal * 0.45, pLow))));
 
                 let highMask = new cv.Mat(), lowMask = new cv.Mat();
-                cv.threshold(satoMat, highMask, Math.round(highVal * 255), 255, cv.THRESH_BINARY);
-                cv.threshold(satoMat, lowMask, Math.round(lowVal * 255), 255, cv.THRESH_BINARY);
+                const highThreshU8 = Math.min(254, Math.max(1, Math.round(highVal * 255)));
+                const lowThreshU8 = Math.min(highThreshU8, Math.max(1, Math.round(lowVal * 255)));
+                cv.threshold(satoMat, highMask, highThreshU8, 255, cv.THRESH_BINARY);
+                cv.threshold(satoMat, lowMask, lowThreshU8, 255, cv.THRESH_BINARY);
 
                 let labels = new cv.Mat(), stats = new cv.Mat(), centroids = new cv.Mat();
                 const numLabels = cv.connectedComponentsWithStats(lowMask, labels, stats, centroids, 8, cv.CV_32S);
@@ -2868,7 +2870,7 @@
                 // Per-color masks debug visualization (Red, Green, Blue)
                 let colorMasksVis = cv.Mat.zeros(workH, workW, cv.CV_8UC3);
                 const cmVisD = colorMasksVis.data;
-                let rCnt = 0, gCnt = 0, bCnt = 0;
+                let rCnt = 0, gCnt = 0, bCnt = 0, kCnt = 0;
                 for (let i = 0; i < hystData.length; i++) {
                     if (hystData[i] === 0) continue;
                     const da_i = aDataW[i] - medA;
@@ -2891,10 +2893,12 @@
                             cmVisD[p3] = 229; cmVisD[p3 + 1] = 57; cmVisD[p3 + 2] = 53; rCnt++;
                         } else if (da_i <= -2.0) {
                             cmVisD[p3] = 67; cmVisD[p3 + 1] = 160; cmVisD[p3 + 2] = 71; gCnt++;
+                        } else if (medL - lWork.data[i] >= 11.0) {
+                            cmVisD[p3] = 195; cmVisD[p3 + 1] = 205; cmVisD[p3 + 2] = 218; kCnt++;
                         }
                     }
                 }
-                showCanvas('4', colorMasksVis, `Per-Color Masks Composite (Red=${rCnt}px, Green=${gCnt}px, Blue=${bCnt}px)`, true);
+                showCanvas('4', colorMasksVis, `Per-Color Masks Composite (Red=${rCnt}px, Green=${gCnt}px, Blue=${bCnt}px, Black=${kCnt}px)`, true);
                 colorMasksVis.delete();
                 addLog('Stage 4 done.', 'ok');
 
@@ -3114,8 +3118,9 @@
                         const cLbl = colorLabelArr[idx];
                         const p3 = idx * 3;
                         if (cLbl === 1) { gvD[p3] = 229; gvD[p3 + 1] = 57; gvD[p3 + 2] = 53; }
+                        else if (cLbl === 2) { gvD[p3] = 67; gvD[p3 + 1] = 160; gvD[p3 + 2] = 71; }
                         else if (cLbl === 3) { gvD[p3] = 30; gvD[p3 + 1] = 136; gvD[p3 + 2] = 229; }
-                        else { gvD[p3] = 67; gvD[p3 + 1] = 160; gvD[p3 + 2] = 71; }
+                        else { gvD[p3] = 195; gvD[p3 + 1] = 205; gvD[p3 + 2] = 218; }
                     }
                 }
                 for (let ch of chains) {
@@ -3523,7 +3528,8 @@
                             simp.push([first[0], first[1]]);
                         }
                     }
-                    const chLayer = classifyCurveLayer(poly, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, ch.isClosed);
+                    const minBlackDarkness = isHighFluteNoiseMode ? 22.0 : 11.5;
+                    const chLayer = classifyCurveLayer(poly, lWork, aWork, bWork, rgbWork, bgLMat, bgAMat, bgBMat, medL, medA, medB, activePens, ch.isClosed, minBlackDarkness);
                     if (!chLayer) continue;
                     tracedCurves.push({
                         workPts: simp,
@@ -3673,7 +3679,8 @@
                     for (let tc of tracedCurves) {
                         if (tc.lengthPx < 18.0) continue;
                         const samplePts = (tc.densePts && tc.densePts.length > 0) ? tc.densePts : tc.workPts;
-                        const layer = classifyCurveLayer(samplePts, lWork, aWork, bWork, rgbWork, bgAMat, bgBMat, medA, medB, activePens, tc.isClosed);
+                        const minBlackDarkness = isHighFluteNoiseMode ? 22.0 : 11.5;
+                        const layer = classifyCurveLayer(samplePts, lWork, aWork, bWork, rgbWork, bgLMat, bgAMat, bgBMat, medL, medA, medB, activePens, tc.isClosed, minBlackDarkness);
                         if (!layer) continue;
 
                         const fit = fitGeometricModel(tc.densePts, tc.workPts, tc.isClosed);
@@ -3959,7 +3966,7 @@
                 lRoi.delete(); aRoi.delete(); bRoi.delete(); labPlanes.delete();
                 ignoreMask.delete(); lWork.delete(); aWork.delete(); bWork.delete();
                 ignoreWork.delete(); rgbWork.delete(); flatBi.delete(); satoMat.delete();
-                bgAMat.delete(); bgBMat.delete();
+                bgLMat.delete(); bgAMat.delete(); bgBMat.delete();
                 hystMat.delete(); cleanMask.delete(); skelVis.delete(); vecVis.delete(); fitVis.delete();
             } catch (err) {
                 addLog('ERROR: ' + err.message, 'err');
