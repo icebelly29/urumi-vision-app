@@ -4,67 +4,172 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Urumi Vision :: Stroke Detector 9-Stage Pipeline Dry Run (ROI Zoom)</title>
+    <title>Urumi Vision :: 9-Stage CNC Stroke Studio</title>
     <style>
+        :root {
+            --ps-bg-darkest: #141414;
+            --ps-pasteboard: #1e1e1e;
+            --ps-panel-bg: #252526;
+            --ps-header-bg: #2d2d2d;
+            --ps-toolbar-bg: #323232;
+            --ps-control-bg: #383838;
+            --ps-control-hover: #464646;
+            --ps-border: #1a1a1a;
+            --ps-border-light: #3e3e40;
+            --ps-text: #dcdcdc;
+            --ps-text-muted: #969696;
+            --ps-text-bright: #ffffff;
+            --ps-accent: #1473e6;
+            --ps-accent-hover: #0d66d0;
+            --ps-accent-soft: rgba(20, 115, 230, 0.22);
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
 
-        body {
-            font-family: Arial, sans-serif;
-            font-size: 14px;
-            background-color: #ffffff;
-            color: #000000;
-            padding: 16px;
-            line-height: 1.4;
+        html, body {
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            background-color: var(--ps-bg-darkest);
+            color: var(--ps-text);
+            user-select: none;
+            display: flex;
+            flex-direction: column;
         }
 
-        header {
-            border-bottom: 1px solid #ccc;
-            padding-bottom: 12px;
-            margin-bottom: 16px;
+        /* Custom Studio Scrollbars */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #202020;
+            border-left: 1px solid var(--ps-border);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #484848;
+            border-radius: 2px;
+            border: 2px solid #202020;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5a5a5a;
         }
 
-        h1 {
-            font-size: 20px;
-            margin-bottom: 4px;
+        /* 1. TOP APPLICATION MENU BAR */
+        #ps-menubar {
+            height: 28px;
+            background: var(--ps-header-bg);
+            border-bottom: 1px solid var(--ps-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 10px 0 6px;
+            flex-shrink: 0;
+            font-size: 11.5px;
         }
 
-        p.sub {
-            color: #555;
-            font-size: 13px;
+        .ps-menu-left {
+            display: flex;
+            align-items: center;
+            gap: 2px;
         }
 
+        .ps-app-badge {
+            width: 22px;
+            height: 20px;
+            border-radius: 3px;
+            background: #001e36;
+            border: 1px solid #31a8ff;
+            color: #31a8ff;
+            font-weight: 800;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 6px;
+            letter-spacing: -0.4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        }
+
+        .ps-menu-item {
+            padding: 3px 8px;
+            border-radius: 3px;
+            color: var(--ps-text);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .ps-menu-item:hover {
+            background: var(--ps-control-hover);
+            color: #fff;
+        }
+
+        .ps-doc-title-bar {
+            color: var(--ps-text-muted);
+            font-size: 11px;
+            letter-spacing: 0.2px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ps-menu-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ps-workspace-pill {
+            background: var(--ps-control-bg);
+            border: 1px solid var(--ps-border-light);
+            color: var(--ps-text);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        /* 2. TOOL OPTIONS BAR */
         #toolbar {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            margin-bottom: 16px;
-            padding: 12px 14px;
-            background: #f8fafc;
-            border: 1px solid #cbd5e1;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            gap: 6px;
+            padding: 5px 10px;
+            background: var(--ps-toolbar-bg);
+            border-bottom: 1px solid var(--ps-border);
+            flex-shrink: 0;
         }
 
         .tb-row {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
             flex-wrap: wrap;
+        }
+
+        .tb-divider {
+            width: 1px;
+            height: 18px;
+            background: #484848;
+            margin: 0 2px;
         }
 
         .tb-group {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 13px;
+            background: #292929;
+            border: 1px solid var(--ps-border-light);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11.5px;
+            color: var(--ps-text);
         }
 
         .tb-group label {
@@ -73,610 +178,1194 @@
             gap: 4px;
             cursor: pointer;
             user-select: none;
+            color: var(--ps-text);
         }
 
         .tb-group-title {
-            font-weight: 700;
-            font-size: 12px;
-            color: #475569;
+            font-weight: 600;
+            font-size: 10.5px;
+            color: var(--ps-text-muted);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-right: 4px;
+            letter-spacing: 0.4px;
+            margin-right: 3px;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            background: #1d1d1d;
+            color: var(--ps-text-bright);
+            border: 1px solid #484848;
+            border-radius: 2px;
+            padding: 2px 5px;
+            font-size: 11px;
+            font-family: inherit;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--ps-accent);
+        }
+
+        input[type="checkbox"] {
+            accent-color: var(--ps-accent);
+            cursor: pointer;
+        }
+
+        input[type="file"] {
+            font-size: 11px;
+            color: var(--ps-text);
+            max-width: 195px;
+        }
+
+        input[type="file"]::file-selector-button {
+            background: var(--ps-control-bg);
+            color: var(--ps-text-bright);
+            border: 1px solid #525252;
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            margin-right: 6px;
+        }
+
+        input[type="file"]::file-selector-button:hover {
+            background: var(--ps-control-hover);
         }
 
         .param-help {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 15px;
-            height: 15px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
-            background: #e2e8f0;
-            color: #475569;
-            font-size: 11px;
+            background: #3d3d3d;
+            color: #b0b0b0;
+            font-size: 10px;
             font-weight: bold;
             cursor: help;
             margin-left: 2px;
             position: relative;
+            border: 1px solid #525252;
         }
 
         .param-help:hover::after {
             content: attr(data-tooltip);
             position: absolute;
-            bottom: 125%;
+            top: 135%;
             left: 50%;
             transform: translateX(-50%);
-            background: #1e293b;
-            color: #f8fafc;
+            background: #111111;
+            color: #f0f0f0;
+            border: 1px solid #484848;
             padding: 6px 10px;
-            border-radius: 5px;
+            border-radius: 3px;
             font-size: 11px;
-            line-height: 1.3;
+            line-height: 1.35;
             white-space: normal;
             width: 220px;
-            z-index: 1000;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+            z-index: 2000;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
             pointer-events: none;
             font-weight: normal;
             text-transform: none;
         }
 
-        .badge-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            border: 1px solid transparent;
-            user-select: none;
-        }
-
-        .badge-pill.blue {
-            background: #eff6ff;
-            color: #1d4ed8;
-            border-color: #bfdbfe;
-        }
-
-        .badge-pill.red {
-            background: #fef2f2;
-            color: #b91c1c;
-            border-color: #fecaca;
-        }
-
-        .badge-pill.green {
-            background: #f0fdf4;
-            color: #15803d;
-            border-color: #bbf7d0;
-        }
-
-        .badge-pill.black {
-            background: #f3f4f6;
-            color: #111827;
-            border-color: #d1d5db;
-        }
-
         #btnRun {
-            background: #2563eb;
+            background: var(--ps-accent);
             color: #ffffff;
-            border: none;
-            padding: 7px 16px;
-            border-radius: 6px;
+            border: 1px solid #2680eb;
+            padding: 4px 14px;
+            border-radius: 12px;
             font-weight: 600;
-            font-size: 13px;
+            font-size: 11.5px;
             cursor: pointer;
             transition: background 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
         }
 
         #btnRun:hover:not(:disabled) {
-            background: #1d4ed8;
+            background: var(--ps-accent-hover);
         }
 
         #btnRun:disabled {
-            background: #94a3b8;
+            background: #3a3a3a;
+            border-color: #4a4a4a;
+            color: #777777;
             cursor: not-allowed;
         }
 
-        #btnToggleAdv {
-            background: #e2e8f0;
-            color: #334155;
-            border: 1px solid #cbd5e1;
-            padding: 5px 10px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
+        #btnToggleAdv, .ps-btn {
+            background: var(--ps-control-bg);
+            color: var(--ps-text);
+            border: 1px solid #505050;
+            padding: 3px 9px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
             cursor: pointer;
         }
 
-        #btnToggleAdv:hover {
-            background: #cbd5e1;
+        #btnToggleAdv:hover, .ps-btn:hover {
+            background: var(--ps-control-hover);
+            color: #fff;
         }
 
         .btn-preset {
-            background: #f1f5f9;
-            color: #0f172a;
-            border: 1px solid #cbd5e1;
-            padding: 3px 8px;
-            border-radius: 4px;
+            background: var(--ps-control-bg);
+            color: var(--ps-text);
+            border: 1px solid #4f4f4f;
+            padding: 2px 8px;
+            border-radius: 3px;
             font-size: 11px;
             cursor: pointer;
-            font-weight: 600;
         }
 
-        .btn-preset:hover {
-            background: #e2e8f0;
-        }
-
-        #advancedRow {
-            display: none;
-            border-top: 1px dashed #cbd5e1;
-            padding-top: 8px;
+        .btn-preset:hover, .btn-preset.active {
+            background: var(--ps-accent-soft);
+            border-color: var(--ps-accent);
+            color: #fff;
         }
 
         #opencvStatus {
-            font-weight: bold;
-            color: #aa6600;
+            font-weight: 600;
+            font-size: 11px;
+            color: #f59e0b;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        #opencvStatus::before {
+            content: "";
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #f59e0b;
+            display: inline-block;
         }
 
         #opencvStatus.ready {
-            color: #008800;
+            color: #34d399;
         }
 
-        button {
-            padding: 4px 12px;
-            font-size: 14px;
-            cursor: pointer;
+        #opencvStatus.ready::before {
+            background: #10b981;
+            box-shadow: 0 0 6px #10b981;
         }
 
-        button:disabled {
-            cursor: not-allowed;
-        }
-
-        #log {
-            background: #f8f8f8;
-            border: 1px solid #ccc;
-            padding: 8px;
-            font-family: monospace;
-            font-size: 12px;
-            max-height: 130px;
-            overflow-y: auto;
-            margin-bottom: 16px;
-        }
-
-        #log .info {
-            color: #0000bb;
-        }
-
-        #log .ok {
-            color: #008800;
-        }
-
-        #log .warn {
-            color: #bb6600;
-        }
-
-        #log .err {
-            color: #cc0000;
-            font-weight: bold;
-        }
-
-        .steps {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 16px;
-        }
-
-        .step {
-            border: 1px solid #ccc;
-            background: #ffffff;
-        }
-
-        .step-header {
-            background: #eeeeee;
-            border-bottom: 1px solid #ccc;
-            padding: 8px;
+        /* 3. MAIN STUDIO WORKSPACE (3-COLUMN FLEX: LEFT TOOLS, CENTER PASTEBOARD, RIGHT DOCK) */
+        #ps-workspace {
             display: flex;
-            align-items: center;
-            gap: 8px;
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
         }
 
-        .step-num {
-            border: 1px solid #888;
-            border-radius: 50%;
-            width: 22px;
-            height: 22px;
+        /* LEFT VERTICAL TOOL DOCK */
+        #ps-tooldock {
+            width: 38px;
+            background: var(--ps-panel-bg);
+            border-right: 1px solid var(--ps-border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 6px 0;
+            gap: 3px;
+            flex-shrink: 0;
+        }
+
+        .ps-tool-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 3px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #bdbdbd;
             display: flex;
             align-items: center;
             justify-content: center;
+            cursor: pointer;
+            font-size: 13px;
+            position: relative;
+        }
+
+        .ps-tool-btn:hover {
+            background: var(--ps-control-bg);
+            color: #ffffff;
+        }
+
+        .ps-tool-btn.active {
+            background: #3c3c3c;
+            border-color: #565656;
+            color: #31a8ff;
+        }
+
+        .ps-tool-btn::after {
+            content: "";
+            position: absolute;
+            right: 2px;
+            bottom: 2px;
+            border-left: 3px solid transparent;
+            border-bottom: 3px solid #888;
+        }
+
+        .ps-tool-sep {
+            width: 22px;
+            height: 1px;
+            background: #3a3a3a;
+            margin: 3px 0;
+        }
+
+        .ps-swatches {
+            margin-top: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding-bottom: 6px;
+        }
+
+        .ps-fg-bg {
+            position: relative;
+            width: 26px;
+            height: 26px;
+        }
+
+        .ps-swatch-fg {
+            width: 17px;
+            height: 17px;
+            background: #e53935;
+            border: 1.5px solid #dcdcdc;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 2;
+            cursor: pointer;
+        }
+
+        .ps-swatch-bg {
+            width: 17px;
+            height: 17px;
+            background: #1e88e5;
+            border: 1.5px solid #999;
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            z-index: 1;
+            cursor: pointer;
+        }
+
+        /* CENTER DOCUMENT VIEWPORT & PASTEBOARD */
+        #ps-center {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            background: var(--ps-pasteboard);
+        }
+
+        /* Document Tabs Strip */
+        #ps-doctabs {
+            height: 28px;
+            background: #222222;
+            border-bottom: 1px solid var(--ps-border);
+            display: flex;
+            align-items: flex-end;
+            padding: 0 6px;
+            gap: 2px;
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+
+        #ps-doctabs::-webkit-scrollbar {
+            height: 3px;
+        }
+
+        .ps-doctab {
+            height: 25px;
+            padding: 0 11px;
+            background: #2b2b2b;
+            border: 1px solid var(--ps-border);
+            border-bottom: none;
+            border-radius: 3px 3px 0 0;
+            color: var(--ps-text-muted);
             font-size: 11px;
-            font-weight: bold;
-            background: #fff;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.1s, color 0.1s;
+        }
+
+        .ps-doctab:hover {
+            background: #333333;
+            color: #e0e0e0;
+        }
+
+        .ps-doctab.active {
+            background: var(--ps-pasteboard);
+            color: #ffffff;
+            border-top: 2px solid var(--ps-accent);
+            font-weight: 600;
+        }
+
+        .ps-doctab-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #666;
+        }
+
+        .ps-doctab.done .ps-doctab-dot {
+            background: #10b981;
+        }
+
+        /* Pasteboard Frame */
+        #ps-canvas-frame {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        #main {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 16px;
+            background: var(--ps-pasteboard);
+            background-image: radial-gradient(#2a2a2a 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        /* STAGE CARDS AS STUDIO ARTBOARD WINDOWS */
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 14px;
+            transform-origin: top center;
+            transition: transform 0.15s ease;
+        }
+
+        .steps.single-stage-mode {
+            display: block;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .steps.single-stage-mode .step {
+            display: none;
+        }
+
+        .steps.single-stage-mode .step.active-stage {
+            display: block;
+        }
+
+        .step {
+            border: 1px solid #121212;
+            background: var(--ps-panel-bg);
+            border-radius: 3px;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .step-header {
+            background: var(--ps-header-bg);
+            border-bottom: 1px solid var(--ps-border);
+            padding: 6px 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .step-header:hover {
+            background: #353535;
+        }
+
+        .step-num {
+            border: 1px solid #555;
+            border-radius: 2px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10.5px;
+            font-weight: 700;
+            background: #1e1e1e;
+            color: #aaa;
             flex-shrink: 0;
         }
 
         .step-num.done {
-            background: #ddffdd;
-            border-color: #008800;
-            color: #006600;
+            background: rgba(16, 185, 129, 0.18);
+            border-color: #10b981;
+            color: #34d399;
         }
 
         .step-num.error {
-            background: #ffdddd;
-            border-color: #cc0000;
-            color: #cc0000;
+            background: rgba(239, 68, 68, 0.2);
+            border-color: #ef4444;
+            color: #f87171;
         }
 
         .step-title {
-            font-size: 13px;
-            font-weight: bold;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--ps-text-bright);
         }
 
         .step-desc {
-            font-size: 11px;
-            color: #666;
+            font-size: 10.5px;
+            color: var(--ps-text-muted);
+        }
+
+        .step-expand-btn {
+            margin-left: auto;
+            background: transparent;
+            border: none;
+            color: var(--ps-text-muted);
+            font-size: 13px;
+            cursor: pointer;
+            padding: 2px 5px;
+            border-radius: 2px;
+        }
+
+        .step-expand-btn:hover {
+            background: var(--ps-control-hover);
+            color: #fff;
         }
 
         .step-body {
-            padding: 8px;
+            padding: 10px;
+            background: #191919;
+            flex: 1;
         }
 
         .step-body canvas,
         .step-body img,
         .step-body svg {
             max-width: 100%;
-            border: 1px solid #ccc;
+            border: 1px solid #0e0e0e;
             display: block;
+            margin: 0 auto;
+            background-color: #121212;
+            background-image:
+                linear-gradient(45deg, #1c1c1c 25%, transparent 25%),
+                linear-gradient(-45deg, #1c1c1c 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #1c1c1c 75%),
+                linear-gradient(-45deg, transparent 75%, #1c1c1c 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        }
+
+        .step-body svg {
+            background: #141414;
         }
 
         .step-meta {
-            font-size: 11px;
-            color: #555;
+            font-size: 10.5px;
+            color: #a8a8a8;
             margin-top: 6px;
-            font-family: monospace;
+            padding: 5px 7px;
+            background: #222222;
+            border: 1px solid #2e2e2e;
+            border-radius: 2px;
+            font-family: "Consolas", "SFMono-Regular", Menlo, monospace;
             white-space: pre-wrap;
+            user-select: text;
         }
 
         .step-empty {
-            font-size: 12px;
-            color: #888;
-            padding: 12px 0;
+            font-size: 11px;
+            color: #666;
+            padding: 28px 0;
             text-align: center;
+            font-style: italic;
+        }
+
+        /* RIGHT STUDIO PANEL DOCK */
+        #ps-rightdock {
+            width: 310px;
+            background: var(--ps-panel-bg);
+            border-left: 1px solid var(--ps-border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow-y: auto;
+        }
+
+        .ps-panel {
+            border-bottom: 1px solid var(--ps-border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ps-panel-tabs {
+            height: 26px;
+            background: #202020;
+            border-bottom: 1px solid var(--ps-border);
+            display: flex;
+            align-items: center;
+            padding: 0 4px;
+            gap: 2px;
+        }
+
+        .ps-panel-tab {
+            padding: 4px 10px;
+            font-size: 11px;
+            color: var(--ps-text-muted);
+            border-top: 2px solid transparent;
+            cursor: pointer;
+        }
+
+        .ps-panel-tab.active {
+            background: var(--ps-panel-bg);
+            color: var(--ps-text-bright);
+            border-top-color: var(--ps-accent);
+            font-weight: 600;
+        }
+
+        .ps-panel-body {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        /* Properties / Adjustments Grid */
+        #advancedRow {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .ps-prop-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--ps-text);
+        }
+
+        .ps-prop-label {
+            color: var(--ps-text-muted);
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Layers Panel */
+        .ps-layer-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            background: #2a2a2a;
+            border-bottom: 1px solid var(--ps-border);
+            font-size: 10.5px;
+            color: var(--ps-text-muted);
+        }
+
+        .ps-layer-list {
+            display: flex;
+            flex-direction: column;
+            background: #222222;
+        }
+
+        .ps-layer-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 8px;
+            border-bottom: 1px solid #1b1b1b;
+            background: #282828;
+            cursor: pointer;
+            font-size: 11.5px;
+            color: var(--ps-text);
+            transition: background 0.1s;
+        }
+
+        .ps-layer-row:hover {
+            background: #323232;
+        }
+
+        .ps-layer-row.selected {
+            background: #374151;
+        }
+
+        .ps-layer-eye {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 20px;
+            background: #222;
+            border: 1px solid #3c3c3c;
+            border-radius: 2px;
+        }
+
+        .ps-layer-swatch {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+            border: 1px solid rgba(255,255,255,0.35);
+            flex-shrink: 0;
+        }
+
+        .ps-layer-name {
+            flex: 1;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .ps-layer-tag {
+            font-family: monospace;
+            font-size: 10px;
+            color: #9ca3af;
+            background: #1d1d1d;
+            padding: 1px 5px;
+            border-radius: 2px;
+            border: 1px solid #383838;
+        }
+
+        /* Console / History Log in Dock */
+        #log {
+            background: #181818;
+            border: 1px solid var(--ps-border);
+            padding: 8px;
+            font-family: "Consolas", "SFMono-Regular", monospace;
+            font-size: 11px;
+            height: 190px;
+            overflow-y: auto;
+            line-height: 1.45;
+            user-select: text;
+        }
+
+        #log .info {
+            color: #60a5fa;
+        }
+
+        #log .ok {
+            color: #34d399;
+        }
+
+        #log .warn {
+            color: #fbbf24;
+        }
+
+        #log .err {
+            color: #f87171;
+            font-weight: bold;
+        }
+
+        /* 4. BOTTOM STATUS BAR */
+        #ps-statusbar {
+            height: 22px;
+            background: var(--ps-header-bg);
+            border-top: 1px solid var(--ps-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 10px;
+            font-size: 10.5px;
+            color: var(--ps-text-muted);
+            flex-shrink: 0;
+        }
+
+        .ps-status-left, .ps-status-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
     </style>
 </head>
 
 <body>
 
-    <header>
-        <h1>Urumi Vision - 9-Stage Thin Stroke Detector Dry Run (Lasso ROI Zoom &amp; Bed Scaling)</h1>
-        <p class="sub">Crops and supersamples the Lasso / Auto-Detected cardboard ROI for high-resolution 9-stage Sato
-            Hessian ridge detection, then scales &amp; offsets vector coordinates back to the full 775×1065 mm ArUco
-            bed.</p>
-    </header>
-
-    <div id="toolbar">
-        <!-- Row 1: Primary Controls & Actions -->
-        <div class="tb-row">
+    <!-- 1. TOP APPLICATION MENU BAR -->
+    <div id="ps-menubar">
+        <div class="ps-menu-left">
+            <div class="ps-app-badge" title="Urumi Vision Studio">Uv</div>
+            <span class="ps-menu-item" onclick="document.getElementById('fileInput').click()">File</span>
+            <span class="ps-menu-item" onclick="document.getElementById('btnRun').click()">Pipeline</span>
+            <span class="ps-menu-item" onclick="document.getElementById('useLasso').click()">Select</span>
+            <span class="ps-menu-item" onclick="activateStageTab('3')">Filter</span>
+            <span class="ps-menu-item" onclick="toggleGridViewMode()">View</span>
+            <span class="ps-menu-item" onclick="toggleRightDock()">Window</span>
+        </div>
+        <div class="ps-doc-title-bar">
+            <span>Urumi_CNC_Bed_775x1065mm.uvd @ <span id="psZoomLabel">100%</span> (CIE-LAB / 4-Layer Vector SVG)</span>
+        </div>
+        <div class="ps-menu-right">
             <span id="opencvStatus">OpenCV loading...</span>
+            <button type="button" class="ps-workspace-pill" onclick="downloadGeneratedSvg()" title="Download 1:1 mm 4-Layer CNC SVG">⬇ Export SVG</button>
+            <span class="ps-workspace-pill" onclick="toggleRightDock()">Workspace: CNC Studio ▾</span>
+        </div>
+    </div>
 
+    <!-- 2. TOOL OPTIONS BAR -->
+    <div id="toolbar">
+        <div class="tb-row">
             <div class="tb-group">
-                <span class="tb-group-title">Input</span>
-                <input type="file" id="fileInput" accept="image/*" disabled style="font-size: 12px;">
+                <span class="tb-group-title">Source</span>
+                <input type="file" id="fileInput" accept="image/*" disabled>
             </div>
 
+            <div class="tb-divider"></div>
+
             <div class="tb-group">
-                <span class="tb-group-title">Presets</span>
+                <span class="tb-group-title">Tool Presets</span>
                 <button type="button" class="btn-preset" id="presetFinePen">Fine Pen (Faint)</button>
-                <button type="button" class="btn-preset" id="presetMarker">Marker (Default)</button>
+                <button type="button" class="btn-preset active" id="presetMarker">Marker (Default)</button>
                 <button type="button" class="btn-preset" id="presetNoisy">Noisy Cardboard</button>
             </div>
 
-            <div class="tb-group">
-                <span class="tb-group-title">Active Tool Layers</span>
-                <label class="badge-pill blue">
-                    <input type="checkbox" id="penBlue" checked> Blue (Cut)
-                </label>
-                <label class="badge-pill red">
-                    <input type="checkbox" id="penRed" checked> Red (Score)
-                </label>
-                <label class="badge-pill green">
-                    <input type="checkbox" id="penGreen" checked> Green (Crease)
-                </label>
-                <label class="badge-pill black">
-                    <input type="checkbox" id="penBlack" checked> Black (Cut)
-                </label>
-            </div>
+            <div class="tb-divider"></div>
 
-            <button id="btnRun" disabled>Run 9-Stage Pipeline</button>
-            <button type="button" id="btnToggleAdv">Advanced Settings ▾</button>
-        </div>
-
-        <!-- Row 2: Standard Workpiece & Bed Options -->
-        <div class="tb-row">
             <div class="tb-group">
-                <span class="tb-group-title">Bed Calibration</span>
+                <span class="tb-group-title">Bed</span>
                 <label title="Straighten perspective using ArUco markers on the cutting bed frame">
-                    <input type="checkbox" id="useAruco" checked> Flatten Bed (ArUco)
+                    <input type="checkbox" id="useAruco" checked> ArUco Flatten
                 </label>
                 <span class="param-help"
                     data-tooltip="Detects the 4 corner ArUco markers and flattens the image to 775x1065 mm bed space.">?</span>
             </div>
 
             <div class="tb-group">
-                <span class="tb-group-title">Cardboard ROI</span>
+                <span class="tb-group-title">ROI Crop</span>
                 <label title="Select workpiece bounding box detector">
-                    Method:
-                    <select id="roiDetectorSelect" style="padding: 2px 4px; font-size: 12px; margin-left: 2px;">
+                    <select id="roiDetectorSelect">
                         <option value="contour" selected>Auto-Detect (Contours)</option>
                         <option value="yolo">Auto-Detect (YOLO)</option>
                         <option value="none">None (Full Bed)</option>
                     </select>
                 </label>
-                <span class="param-help"
-                    data-tooltip="Finds the cardboard workpiece automatically to zoom in and eliminate outer bed clutter.">?</span>
-
-                <label style="margin-left: 6px;" title="Inner margin to ignore cardboard edge shadows">
-                    Edge Inset:
-                    <input type="number" id="roiInset" value="16" min="0" max="150" step="4"
-                        style="width: 48px; padding: 2px; font-size: 12px;"> px
+                <label style="margin-left: 4px;" title="Inner margin to ignore cardboard edge shadows">
+                    Inset:
+                    <input type="number" id="roiInset" value="16" min="0" max="150" step="4" style="width: 44px;"> px
+                </label>
+                <label style="margin-left: 4px;" title="Review and adjust the detected crop boundary interactively">
+                    <input type="checkbox" id="useLasso" checked> Lasso Confirm
                 </label>
                 <span class="param-help"
-                    data-tooltip="Shaves border pixels inward to prevent cardboard cut-edge shadows from registering as strokes.">?</span>
-
-                <label style="margin-left: 6px;" title="Review and adjust the detected crop boundary interactively">
-                    <input type="checkbox" id="useLasso" checked> Confirm with Lasso
-                </label>
-                <span class="param-help"
-                    data-tooltip="Opens an interactive window to verify or redraw the processing area before stroke detection.">?</span>
-            </div>
-        </div>
-
-        <!-- Row 3: Advanced Pipeline Tuning (Hidden by Default) -->
-        <div class="tb-row" id="advancedRow">
-            <div class="tb-group">
-                <span class="tb-group-title">Filter Scales (Sigmas)</span>
-                <input type="text" id="sigmaInput" value="1.5, 2.5"
-                    style="width: 72px; padding: 2px 4px; font-size: 12px;">
-                <span class="param-help"
-                    data-tooltip="Gaussian scales (px) for Sato Hessian ridge filter. Use '1.0, 1.8' for very thin ballpoint pens, '1.5, 2.5' for normal pens, '2.0, 3.5' for thick markers.">?</span>
+                    data-tooltip="Opens the Select & Mask window to verify or redraw the processing area.">?</span>
             </div>
 
-            <div class="tb-group">
-                <span class="tb-group-title">Detection Thresholds</span>
-                <label title="Percentile thresholds for strong and weak stroke detection">
-                    High / Low %:
-                    <input type="number" id="hystHigh" value="97.0" min="75" max="99.5" step="0.5"
-                        style="width: 46px; padding: 2px; font-size: 12px;">
-                    /
-                    <input type="number" id="hystLow" value="84" min="55" max="98" step="1"
-                        style="width: 42px; padding: 2px; font-size: 12px;">
-                </label>
-                <span class="param-help"
-                    data-tooltip="Percentile cutoffs for hysteresis binarization. High threshold seeds stroke candidates; Low threshold connects faint continuing lines.">?</span>
-            </div>
+            <div class="tb-divider"></div>
 
-            <div class="tb-group">
-                <span class="tb-group-title">Noise Suppression</span>
-                <label title="Morphological closing kernel size (px)">
-                    Close:
-                    <input type="number" id="closeKernelSize" value="5" min="3" max="9" step="2"
-                        style="width: 38px; padding: 2px; font-size: 12px;"> px
-                </label>
-                <label style="margin-left: 4px;"
-                    title="Max distance (px) to bridge aligned same-color skeleton endpoints">
-                    Bridge:
-                    <input type="number" id="bridgeDistPx" value="12" min="0" max="40" step="2"
-                        style="width: 40px; padding: 2px; font-size: 12px;"> px
-                </label>
-                <label style="margin-left: 4px;" title="ROI border margin (px) masked out before skeletonization">
-                    Border:
-                    <input type="number" id="roiBorderMarginPx" value="18" min="0" max="40" step="2"
-                        style="width: 38px; padding: 2px; font-size: 12px;"> px
-                </label>
-                <label style="margin-left: 4px;" title="Minimum stroke length/diagonal in pixels">
-                    Min Size:
-                    <input type="number" id="minSpanPx" value="22" min="10" max="300" step="2"
-                        style="width: 44px; padding: 2px; font-size: 12px;"> px
-                </label>
-                <span class="param-help"
-                    data-tooltip="Discards isolated markings smaller than this pixel span. Rejects speckles and cardboard grain flutes.">?</span>
+            <button id="btnRun" disabled>▶ Run 9-Stage Pipeline</button>
 
-                <label style="margin-left: 6px;" title="Length of false side whiskers to prune at intersections">
-                    Prune Spurs:
-                    <input type="number" id="spurLenPx" value="24" min="0" max="100" step="4"
-                        style="width: 44px; padding: 2px; font-size: 12px;"> px
-                </label>
-                <span class="param-help"
-                    data-tooltip="Removes skeleton dead-end branches shorter than this length at crossing junctions to avoid cutting tool stutter.">?</span>
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
+                <button type="button" class="ps-btn" id="btnViewMode" onclick="toggleGridViewMode()" title="Switch between Tiled Artboard Grid and Single Document Canvas">⊞ Grid View</button>
+                <button type="button" class="ps-btn" onclick="adjustWorkspaceZoom(-0.1)" title="Zoom Out">−</button>
+                <button type="button" class="ps-btn" onclick="adjustWorkspaceZoom(0)" title="Reset Zoom 100%">100%</button>
+                <button type="button" class="ps-btn" onclick="adjustWorkspaceZoom(0.1)" title="Zoom In">+</button>
+                <button type="button" id="btnToggleAdv" title="Toggle Right Dock Panels">Panels ▾</button>
             </div>
         </div>
     </div>
 
-    <div id="main">
-        <div id="log"><span class="info">&gt; Waiting for OpenCV to initialize...</span></div>
+    <!-- 3. STUDIO WORKSPACE -->
+    <div id="ps-workspace">
+        <!-- LEFT VERTICAL TOOL STRIP -->
+        <div id="ps-tooldock">
+            <button type="button" class="ps-tool-btn active" title="Move / Artboard Overview (V)" onclick="activateStageTab('all', this)">✥</button>
+            <button type="button" class="ps-tool-btn" title="Rectangular / Polygon Lasso ROI (L)" onclick="activateStageTab('0', this)">⬚</button>
+            <button type="button" class="ps-tool-btn" title="Crop & Quality Gate Inspector (C)" onclick="activateStageTab('1', this)"> crop </button>
+            <button type="button" class="ps-tool-btn" title="Flat-Field & Eyedropper Chroma Map (I)" onclick="activateStageTab('2', this)">✎</button>
+            <div class="ps-tool-sep"></div>
+            <button type="button" class="ps-tool-btn" title="Multi-Scale Sato Hessian Filter (J)" onclick="activateStageTab('3', this)">∿</button>
+            <button type="button" class="ps-tool-btn" title="Hysteresis Threshold Mask (M)" onclick="activateStageTab('4', this)">◐</button>
+            <button type="button" class="ps-tool-btn" title="1px Zhang-Suen Skeleton Graph (P)" onclick="activateStageTab('5', this)">☍</button>
+            <div class="ps-tool-sep"></div>
+            <button type="button" class="ps-tool-btn" title="Vectorize & Parametric Shape Fit (U)" onclick="activateStageTab('7', this)">△</button>
+            <button type="button" class="ps-tool-btn" title="4-Layer Physical CNC SVG Output (S)" onclick="activateStageTab('9', this)">❖</button>
+            <button type="button" class="ps-tool-btn" title="50% Opacity QC Overlay Compare (Q)" onclick="activateStageTab('10', this)">⧉</button>
+            <div class="ps-tool-sep"></div>
+            <button type="button" class="ps-tool-btn" title="Toggle Single Canvas / All Artboards (Z)" onclick="toggleGridViewMode()">🔍</button>
 
-        <div class="steps">
-            <div class="step" id="step-0">
-                <div class="step-header">
-                    <div class="step-num" id="num-0">0</div>
-                    <div>
-                        <div class="step-title">ArUco Flatten &amp; Lasso ROI Crop</div>
-                        <div class="step-desc">4-corner homography (775×1065 mm) + ROI crop &amp; zoom</div>
-                    </div>
+            <div class="ps-swatches" title="Active CNC Tool Layer Swatches (Red=Score, Blue=Cut)">
+                <div class="ps-fg-bg">
+                    <div class="ps-swatch-fg" title="Foreground: Red Score Layer (#e53935)"></div>
+                    <div class="ps-swatch-bg" title="Background: Blue Thru-Cut Layer (#1e88e5)"></div>
                 </div>
-                <div class="step-body">
-                    <div class="step-empty">No image loaded yet.</div>
+            </div>
+        </div>
+
+        <!-- CENTER PASTEBOARD & DOCUMENT TABS -->
+        <div id="ps-center">
+            <!-- Document Tabs -->
+            <div id="ps-doctabs">
+                <div class="ps-doctab active" data-tab="all" onclick="activateStageTab('all')">
+                    <span>⊞ All Artboards (0–10)</span>
+                </div>
+                <div class="ps-doctab" data-tab="0" id="tab-0" onclick="activateStageTab('0')">
+                    <span class="ps-doctab-dot"></span><span>0: ArUco &amp; ROI</span>
+                </div>
+                <div class="ps-doctab" data-tab="1" id="tab-1" onclick="activateStageTab('1')">
+                    <span class="ps-doctab-dot"></span><span>1: Quality Gate</span>
+                </div>
+                <div class="ps-doctab" data-tab="2" id="tab-2" onclick="activateStageTab('2')">
+                    <span class="ps-doctab-dot"></span><span>2: Flat-Field</span>
+                </div>
+                <div class="ps-doctab" data-tab="3" id="tab-3" onclick="activateStageTab('3')">
+                    <span class="ps-doctab-dot"></span><span>3: Sato Ridge</span>
+                </div>
+                <div class="ps-doctab" data-tab="4" id="tab-4" onclick="activateStageTab('4')">
+                    <span class="ps-doctab-dot"></span><span>4: Hysteresis</span>
+                </div>
+                <div class="ps-doctab" data-tab="5" id="tab-5" onclick="activateStageTab('5')">
+                    <span class="ps-doctab-dot"></span><span>5: Skeleton</span>
+                </div>
+                <div class="ps-doctab" data-tab="6" id="tab-6" onclick="activateStageTab('6')">
+                    <span class="ps-doctab-dot"></span><span>6: Vectorize</span>
+                </div>
+                <div class="ps-doctab" data-tab="7" id="tab-7" onclick="activateStageTab('7')">
+                    <span class="ps-doctab-dot"></span><span>7: Shape Fit</span>
+                </div>
+                <div class="ps-doctab" data-tab="8" id="tab-8" onclick="activateStageTab('8')">
+                    <span class="ps-doctab-dot"></span><span>8: Validation</span>
+                </div>
+                <div class="ps-doctab" data-tab="9" id="tab-9" onclick="activateStageTab('9')">
+                    <span class="ps-doctab-dot"></span><span>9: 4-Layer SVG</span>
+                </div>
+                <div class="ps-doctab" data-tab="10" id="tab-10" onclick="activateStageTab('10')">
+                    <span class="ps-doctab-dot"></span><span>10: QC Overlay</span>
                 </div>
             </div>
 
-            <div class="step" id="step-1">
-                <div class="step-header">
-                    <div class="step-num" id="num-1">1</div>
-                    <div>
-                        <div class="step-title">Stage 1: Capture &amp; Quality Gate (ROI)</div>
-                        <div class="step-desc">Laplacian blur score, brightness &amp; L &gt; 235 + border ignore-mask
+            <!-- Main Pasteboard -->
+            <div id="ps-canvas-frame">
+                <div id="main">
+                    <div class="steps" id="stepsGrid">
+                        <div class="step active-stage" id="step-0">
+                            <div class="step-header" onclick="activateStageTab('0')">
+                                <div class="step-num" id="num-0">0</div>
+                                <div>
+                                    <div class="step-title">ArUco Flatten &amp; Lasso ROI Crop</div>
+                                    <div class="step-desc">4-corner homography (775×1065 mm) + ROI crop &amp; zoom</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">No image loaded yet.</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-1">
+                            <div class="step-header" onclick="activateStageTab('1')">
+                                <div class="step-num" id="num-1">1</div>
+                                <div>
+                                    <div class="step-title">Stage 1: Capture &amp; Quality Gate (ROI)</div>
+                                    <div class="step-desc">Laplacian blur score, brightness &amp; L &gt; 235 + border ignore-mask</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-2">
+                            <div class="step-header" onclick="activateStageTab('2')">
+                                <div class="step-num" id="num-2">2</div>
+                                <div>
+                                    <div class="step-title">Stage 2: ROI Zoom &amp; Flat-Field</div>
+                                    <div class="step-desc">Supersample ROI ~1000px (cubic), LAB L* + chroma flat-field, bilateral</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-3">
+                            <div class="step-header" onclick="activateStageTab('3')">
+                                <div class="step-num" id="num-3">3</div>
+                                <div>
+                                    <div class="step-title">Stage 3: Multi-Scale Sato Ridge Enhancement</div>
+                                    <div class="step-desc">Hessian eigenvalue ridge response on zoomed ROI normalized to 0..1</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-4">
+                            <div class="step-header" onclick="activateStageTab('4')">
+                                <div class="step-num" id="num-4">4</div>
+                                <div>
+                                    <div class="step-title">Stage 4: Hysteresis Threshold</div>
+                                    <div class="step-desc">Percentile hysteresis + morphological close on zoomed ROI</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-5">
+                            <div class="step-header" onclick="activateStageTab('5')">
+                                <div class="step-num" id="num-5">5</div>
+                                <div>
+                                    <div class="step-title">Stage 5: Skeleton &amp; Perceptual Grouping</div>
+                                    <div class="step-desc">1px Zhang-Suen skeletonize, component filtering &amp; branch tracing</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-6">
+                            <div class="step-header" onclick="activateStageTab('6')">
+                                <div class="step-num" id="num-6">6</div>
+                                <div>
+                                    <div class="step-title">Stage 6: Vectorize &amp; Scale to Full Bed</div>
+                                    <div class="step-desc">RDP simplification + map (x_work·scaleX + roiX, y_work·scaleY + roiY)</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-7">
+                            <div class="step-header" onclick="activateStageTab('7')">
+                                <div class="step-num" id="num-7">7</div>
+                                <div>
+                                    <div class="step-title">Stage 7: Shape Model Selection</div>
+                                    <div class="step-desc">Line → Circle → Ellipse → Sharp Polygon/Freehand on Zoomed ROI</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-8">
+                            <div class="step-header" onclick="activateStageTab('8')">
+                                <div class="step-num" id="num-8">8</div>
+                                <div>
+                                    <div class="step-title">Stage 8: Validation &amp; Confidence</div>
+                                    <div class="step-desc">Inlier ratio, 10° angular coverage bins, fit residual &amp; contrast</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-9">
+                            <div class="step-header" onclick="activateStageTab('9')">
+                                <div class="step-num" id="num-9">9</div>
+                                <div>
+                                    <div class="step-title">Stage 9: Final 4-Layer SVG &amp; JSON Output</div>
+                                    <div class="step-desc">1:1 mm Full-Bed Layered SVG (&lt;g id="bed"&gt;, &lt;g id="red"&gt;, &lt;g id="green"&gt;, &lt;g id="blue"&gt;)</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
+                        </div>
+
+                        <div class="step" id="step-10" style="grid-column: 1 / -1;">
+                            <div class="step-header" onclick="activateStageTab('10')">
+                                <div class="step-num" id="num-10">10</div>
+                                <div>
+                                    <div class="step-title">Stage 10: Full-Resolution QC Overlay (50% Opacity)</div>
+                                    <div class="step-desc">All 4 SVG layers rendered on top of the flattened ROI photo at ~50% opacity at full ROI resolution</div>
+                                </div>
+                                <button type="button" class="step-expand-btn" title="Focus Artboard">⤢</button>
+                            </div>
+                            <div class="step-body">
+                                <div class="step-empty">Waiting...</div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
             </div>
+        </div>
 
-            <div class="step" id="step-2">
-                <div class="step-header">
-                    <div class="step-num" id="num-2">2</div>
-                    <div>
-                        <div class="step-title">Stage 2: ROI Zoom &amp; Flat-Field</div>
-                        <div class="step-desc">Supersample ROI ~1000px (cubic), LAB L* + chroma flat-field, bilateral
+        <!-- RIGHT DOCKED STUDIO PANELS (PROPERTIES, LAYERS, HISTORY) -->
+        <div id="ps-rightdock">
+            <!-- Panel 1: Properties & Filter Adjustments -->
+            <div class="ps-panel">
+                <div class="ps-panel-tabs">
+                    <div class="ps-panel-tab active">Properties</div>
+                    <div class="ps-panel-tab">Sato &amp; Hysteresis</div>
+                </div>
+                <div class="ps-panel-body" id="advancedRow">
+                    <div class="ps-prop-row">
+                        <span class="ps-prop-label">Filter Scales (σ px)
+                            <span class="param-help" data-tooltip="Gaussian scales (px) for Sato Hessian ridge filter. Use '1.0, 1.8' for fine pens, '1.5, 2.5' for markers.">?</span>
+                        </span>
+                        <input type="text" id="sigmaInput" value="1.5, 2.5" style="width: 90px; text-align: right;">
+                    </div>
+
+                    <div class="ps-prop-row">
+                        <span class="ps-prop-label">Hysteresis High / Low %
+                            <span class="param-help" data-tooltip="Percentile cutoffs for hysteresis binarization. High seeds ridges; Low connects weak lines.">?</span>
+                        </span>
+                        <div>
+                            <input type="number" id="hystHigh" value="97.0" min="75" max="99.5" step="0.5" style="width: 52px;">
+                            /
+                            <input type="number" id="hystLow" value="84" min="55" max="98" step="1" style="width: 46px;">
                         </div>
                     </div>
-                </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
+
+                    <div class="ps-prop-row">
+                        <span class="ps-prop-label">Morph Close Kernel</span>
+                        <div><input type="number" id="closeKernelSize" value="5" min="3" max="9" step="2" style="width: 52px;"> px</div>
+                    </div>
+
+                    <div class="ps-prop-row">
+                        <span class="ps-prop-label">Endpoint Bridge Gap</span>
+                        <div><input type="number" id="bridgeDistPx" value="12" min="0" max="40" step="2" style="width: 52px;"> px</div>
+                    </div>
+
+                    <div class="ps-prop-row">
+                        <span class="ps-prop-label">ROI Border Mask</span>
+                        <div><input type="number" id="roiBorderMarginPx" value="18" min="0" max="40" step="2" style="width: 52px;"> px</div>
+                    </div>
+
+                    <div class="ps-prop-row">
+                        <span class="ps-prop-label">Min Stroke Span
+                            <span class="param-help" data-tooltip="Discards isolated markings smaller than this pixel span.">?</span>
+                        </span>
+                        <div><input type="number" id="minSpanPx" value="22" min="10" max="300" step="2" style="width: 52px;"> px</div>
+                    </div>
+
+                    <div class="ps-prop-row">
+                        <span class="ps-prop-label">Prune Junction Spurs
+                            <span class="param-help" data-tooltip="Removes skeleton dead-end branches shorter than this length.">?</span>
+                        </span>
+                        <div><input type="number" id="spurLenPx" value="24" min="0" max="100" step="4" style="width: 52px;"> px</div>
+                    </div>
                 </div>
             </div>
 
-            <div class="step" id="step-3">
-                <div class="step-header">
-                    <div class="step-num" id="num-3">3</div>
-                    <div>
-                        <div class="step-title">Stage 3: Multi-Scale Sato Ridge Enhancement</div>
-                        <div class="step-desc">Hessian eigenvalue ridge response on zoomed ROI normalized to 0..1</div>
-                    </div>
+            <!-- Panel 2: Layers Panel -->
+            <div class="ps-panel">
+                <div class="ps-panel-tabs">
+                    <div class="ps-panel-tab active">Layers</div>
+                    <div class="ps-panel-tab">Channels (LAB)</div>
+                    <div class="ps-panel-tab">Paths (SVG)</div>
                 </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
+                <div class="ps-layer-toolbar">
+                    <span>Mode: CNC Toolpath</span>
+                    <span>Opacity: 100%</span>
+                </div>
+                <div class="ps-layer-list">
+                    <label class="ps-layer-row selected" title="Toggle Blue Thru-Cut Layer (Runs 3rd)">
+                        <span class="ps-layer-eye"><input type="checkbox" id="penBlue" checked></span>
+                        <span class="ps-layer-swatch" style="background: #1e88e5;"></span>
+                        <span class="ps-layer-name">Blue (Thru-Cut)</span>
+                        <span class="ps-layer-tag">&lt;g id="blue"&gt;</span>
+                    </label>
+                    <label class="ps-layer-row" title="Toggle Black/Graphite Thru-Cut Layer (Mapped to <g id='blue'>)">
+                        <span class="ps-layer-eye"><input type="checkbox" id="penBlack" checked></span>
+                        <span class="ps-layer-swatch" style="background: #111827; border-color: #9ca3af;"></span>
+                        <span class="ps-layer-name">Black (Thru-Cut)</span>
+                        <span class="ps-layer-tag">&lt;g id="blue"&gt;</span>
+                    </label>
+                    <label class="ps-layer-row" title="Toggle Green Crease Wheel Layer (Runs 2nd)">
+                        <span class="ps-layer-eye"><input type="checkbox" id="penGreen" checked></span>
+                        <span class="ps-layer-swatch" style="background: #43a047;"></span>
+                        <span class="ps-layer-name">Green (Crease)</span>
+                        <span class="ps-layer-tag">&lt;g id="green"&gt;</span>
+                    </label>
+                    <label class="ps-layer-row" title="Toggle Red Score Blade Layer (Runs 1st)">
+                        <span class="ps-layer-eye"><input type="checkbox" id="penRed" checked></span>
+                        <span class="ps-layer-swatch" style="background: #e53935;"></span>
+                        <span class="ps-layer-name">Red (Score)</span>
+                        <span class="ps-layer-tag">&lt;g id="red"&gt;</span>
+                    </label>
+                    <div class="ps-layer-row" style="opacity: 0.78; cursor: default;" title="Reference Machine Bed & Cardboard Polygon Layer (Always Emitted)">
+                        <span class="ps-layer-eye">👁</span>
+                        <span class="ps-layer-swatch" style="background: transparent; border: 1px dashed #9ca3af;"></span>
+                        <span class="ps-layer-name">Bed &amp; Sheet Frame 🔒</span>
+                        <span class="ps-layer-tag">&lt;g id="bed"&gt;</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="step" id="step-4">
-                <div class="step-header">
-                    <div class="step-num" id="num-4">4</div>
-                    <div>
-                        <div class="step-title">Stage 4: Hysteresis Threshold</div>
-                        <div class="step-desc">Percentile hysteresis + morphological close on zoomed ROI</div>
-                    </div>
+            <!-- Panel 3: History / Console Log -->
+            <div class="ps-panel" style="flex: 1;">
+                <div class="ps-panel-tabs">
+                    <div class="ps-panel-tab active">History &amp; Console</div>
+                    <div class="ps-panel-tab" style="margin-left: auto;" onclick="document.getElementById('log').innerHTML=''">Clear</div>
                 </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
-            </div>
-
-            <div class="step" id="step-5">
-                <div class="step-header">
-                    <div class="step-num" id="num-5">5</div>
-                    <div>
-                        <div class="step-title">Stage 5: Skeleton &amp; Perceptual Grouping</div>
-                        <div class="step-desc">1px Zhang-Suen skeletonize, component filtering &amp; branch tracing
-                        </div>
-                    </div>
-                </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
-            </div>
-
-            <div class="step" id="step-6">
-                <div class="step-header">
-                    <div class="step-num" id="num-6">6</div>
-                    <div>
-                        <div class="step-title">Stage 6: Vectorize &amp; Scale to Full Bed</div>
-                        <div class="step-desc">RDP simplification + map (x_work·scaleX + roiX, y_work·scaleY + roiY)
-                        </div>
-                    </div>
-                </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
-            </div>
-
-            <div class="step" id="step-7">
-                <div class="step-header">
-                    <div class="step-num" id="num-7">7</div>
-                    <div>
-                        <div class="step-title">Stage 7: Shape Model Selection</div>
-                        <div class="step-desc">Line → Circle → Ellipse → Sharp Polygon/Freehand on Zoomed ROI</div>
-                    </div>
-                </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
-            </div>
-
-            <div class="step" id="step-8">
-                <div class="step-header">
-                    <div class="step-num" id="num-8">8</div>
-                    <div>
-                        <div class="step-title">Stage 8: Validation &amp; Confidence</div>
-                        <div class="step-desc">Inlier ratio, 10° angular coverage bins, fit residual &amp; contrast
-                        </div>
-                    </div>
-                </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
-            </div>
-
-            <div class="step" id="step-9">
-                <div class="step-header">
-                    <div class="step-num" id="num-9">9</div>
-                    <div>
-                        <div class="step-title">Stage 9: Final 4-Layer SVG &amp; JSON Output</div>
-                        <div class="step-desc">1:1 mm Full-Bed Layered SVG (&lt;g id="bed"&gt;, &lt;g id="red"&gt;,
-                            &lt;g id="green"&gt;, &lt;g id="blue"&gt;)</div>
-                    </div>
-                </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
-            </div>
-
-            <div class="step" id="step-10" style="grid-column: 1 / -1;">
-                <div class="step-header">
-                    <div class="step-num" id="num-10">10</div>
-                    <div>
-                        <div class="step-title">Stage 10: Full-Resolution QC Overlay (50% Opacity)</div>
-                        <div class="step-desc">All 4 SVG layers rendered on top of the flattened ROI photo at ~50%
-                            opacity at full ROI resolution</div>
-                    </div>
-                </div>
-                <div class="step-body">
-                    <div class="step-empty">Waiting...</div>
-                </div>
+                <div id="log"><span class="info">&gt; Waiting for OpenCV to initialize...</span></div>
             </div>
         </div>
     </div>
 
-    <!-- Lasso Modal -->
+    <!-- 4. BOTTOM STATUS BAR -->
+    <div id="ps-statusbar">
+        <div class="ps-status-left">
+            <span id="psStatusZoom">100%</span>
+            <span>|</span>
+            <span>Doc: 775 × 1065 mm (4-Layer CNC SVG)</span>
+            <span>|</span>
+            <span id="psActiveStageLabel">View: All Artboards (Stages 0–10)</span>
+        </div>
+        <div class="ps-status-right">
+            <span>Color Profile: CIE L*a*b* + Sato Hessian</span>
+        </div>
+    </div>
+
+    <!-- Lasso Modal ("Select and Mask" Dark Workspace) -->
     <div id="lassoModal"
-        style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; z-index: 1000; flex-direction: column;">
+        style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #141414; z-index: 3000; flex-direction: column;">
         <div class="lasso-header"
-            style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #111;">
+            style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: #262626; border-bottom: 1px solid #141414;">
             <div class="lasso-title"
-                style="color: white; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                Select area to process
+                style="color: #e5e5e5; font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 8px;">
+                Select and Mask :: Workpiece ROI Boundary
             </div>
-            <div class="lasso-buttons" style="display: flex; gap: 12px;">
+            <div class="lasso-buttons" style="display: flex; gap: 8px;">
                 <button id="btnLassoRect"
-                    style="padding: 8px 16px; font-size: 13px; background: #222; color:white; border: 1px solid #444;">Rect</button>
+                    style="padding: 5px 12px; font-size: 11.5px; background: #383838; color:white; border: 1px solid #555; border-radius: 3px; cursor: pointer;">⬚ Rectangular Marquee</button>
                 <button id="btnLassoPoly"
-                    style="padding: 8px 16px; font-size: 13px; background: #222; color:white; border: 1px solid #444;">Poly</button>
+                    style="padding: 5px 12px; font-size: 11.5px; background: #383838; color:white; border: 1px solid #555; border-radius: 3px; cursor: pointer;">⟁ Polygonal Lasso</button>
                 <button id="btnLassoClear"
-                    style="padding: 8px 16px; font-size: 13px; background: #ef4444; color:white; border:none;">Clear</button>
+                    style="padding: 5px 12px; font-size: 11.5px; background: #7f1d1d; color:white; border: 1px solid #dc2626; border-radius: 3px; cursor: pointer;">Clear</button>
                 <button id="btnLassoConfirm"
-                    style="padding: 8px 16px; font-size: 13px; background:#3b82f6; color:white; border:none;">Confirm
-                    &amp; Zoom ROI</button>
+                    style="padding: 5px 14px; font-size: 11.5px; font-weight: 600; background: #1473e6; color:white; border: 1px solid #2680eb; border-radius: 12px; cursor: pointer;">OK — Confirm &amp; Zoom ROI</button>
             </div>
         </div>
         <div
-            style="flex: 1; overflow: hidden; position: relative; display: flex; justify-content: center; align-items: center; padding: 20px;">
+            style="flex: 1; overflow: hidden; position: relative; display: flex; justify-content: center; align-items: center; padding: 20px; background: #191919;">
             <canvas id="lassoCanvas"
-                style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: crosshair; touch-action: none; border: 1px solid #333; background:#222;"></canvas>
+                style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: crosshair; touch-action: none; border: 1px solid #0e0e0e; background:#121212; box-shadow: 0 8px 24px rgba(0,0,0,0.65);"></canvas>
         </div>
-        <div style="color: #888; text-align: center; padding: 12px; font-size: 13px; background: #111;">
+        <div style="color: #969696; text-align: center; padding: 8px; font-size: 11px; background: #222; border-top: 1px solid #141414;">
             Draw around the cardboard or ink. The selected ROI will be cropped, zoomed in for detection, and scaled back
             to full bed coordinates.
         </div>
@@ -704,6 +1393,84 @@
             el.classList.remove('done', 'error');
             if (err) { el.classList.add('error'); el.textContent = '✗'; }
             else if (done) { el.classList.add('done'); el.textContent = '✓'; }
+            const tabEl = document.getElementById('tab-' + id);
+            if (tabEl) {
+                tabEl.classList.toggle('done', !!done && !err);
+            }
+        }
+
+        // Studio Workspace Tab & View Helpers
+        let currentStageTab = 'all';
+        let currentZoom = 1.0;
+
+        function activateStageTab(tabId, toolBtn) {
+            currentStageTab = String(tabId);
+            const grid = document.getElementById('stepsGrid');
+            const tabs = document.querySelectorAll('#ps-doctabs .ps-doctab');
+            tabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-tab') === currentStageTab));
+
+            if (toolBtn) {
+                document.querySelectorAll('#ps-tooldock .ps-tool-btn').forEach(b => b.classList.remove('active'));
+                toolBtn.classList.add('active');
+            }
+
+            const btnViewMode = document.getElementById('btnViewMode');
+            const stageLabel = document.getElementById('psActiveStageLabel');
+
+            if (currentStageTab === 'all') {
+                grid.classList.remove('single-stage-mode');
+                if (btnViewMode) btnViewMode.textContent = '⊞ Grid View';
+                if (stageLabel) stageLabel.textContent = 'View: All Artboards (Stages 0–10)';
+            } else {
+                grid.classList.add('single-stage-mode');
+                document.querySelectorAll('#stepsGrid .step').forEach(s => {
+                    s.classList.toggle('active-stage', s.id === 'step-' + currentStageTab);
+                });
+                if (btnViewMode) btnViewMode.textContent = '▣ Single Canvas';
+                if (stageLabel) stageLabel.textContent = 'View: Stage ' + currentStageTab + ' Artboard';
+            }
+        }
+
+        function toggleGridViewMode() {
+            if (currentStageTab === 'all') {
+                activateStageTab('10');
+            } else {
+                activateStageTab('all');
+            }
+        }
+
+        function adjustWorkspaceZoom(delta) {
+            if (delta === 0) currentZoom = 1.0;
+            else currentZoom = Math.min(2.0, Math.max(0.5, +(currentZoom + delta).toFixed(2)));
+            const grid = document.getElementById('stepsGrid');
+            if (grid) grid.style.transform = currentZoom === 1 ? '' : `scale(${currentZoom})`;
+            const pct = Math.round(currentZoom * 100) + '%';
+            const zl = document.getElementById('psZoomLabel');
+            const sz = document.getElementById('psStatusZoom');
+            if (zl) zl.textContent = pct;
+            if (sz) sz.textContent = pct;
+        }
+
+        function toggleRightDock() {
+            const dock = document.getElementById('ps-rightdock');
+            if (!dock) return;
+            dock.style.display = dock.style.display === 'none' ? 'flex' : 'none';
+        }
+
+        function downloadGeneratedSvg() {
+            const svgEl = document.querySelector('#step-9 .step-body svg');
+            if (!svgEl) {
+                addLog('Run the pipeline first to generate the 4-layer SVG.', 'warn');
+                return;
+            }
+            const blob = new Blob([svgEl.outerHTML], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'urumi_4layer_cnc_output.svg';
+            a.click();
+            URL.revokeObjectURL(url);
+            addLog('Exported 4-layer CNC SVG: urumi_4layer_cnc_output.svg', 'ok');
         }
 
         function showCanvas(stepId, mat, label, append = false) {
@@ -788,34 +1555,35 @@
 
     <script>
 
-        // Toggle Advanced Tuning Controls
+        // Toggle Right Studio Panels Dock
         const btnToggleAdv = document.getElementById('btnToggleAdv');
-        const advancedRow = document.getElementById('advancedRow');
-        let advOpen = false;
+        let advOpen = true;
         btnToggleAdv.addEventListener('click', () => {
             advOpen = !advOpen;
-            advancedRow.style.display = advOpen ? 'flex' : 'none';
-            btnToggleAdv.textContent = advOpen ? 'Advanced Settings ▴' : 'Advanced Settings ▾';
+            const dock = document.getElementById('ps-rightdock');
+            if (dock) dock.style.display = advOpen ? 'flex' : 'none';
+            btnToggleAdv.textContent = advOpen ? 'Panels ▾' : 'Panels ▸';
         });
 
         // Preset Configurations
-        function applyPreset(sigmas, highPct, lowPct, minSpan, spurLen) {
+        function applyPreset(sigmas, highPct, lowPct, minSpan, spurLen, activeBtnId) {
             document.getElementById('sigmaInput').value = sigmas;
             document.getElementById('hystHigh').value = highPct;
             document.getElementById('hystLow').value = lowPct;
             document.getElementById('minSpanPx').value = minSpan;
             document.getElementById('spurLenPx').value = spurLen;
+            document.querySelectorAll('.btn-preset').forEach(b => b.classList.toggle('active', b.id === activeBtnId));
             addLog(`Applied Preset: Sigmas=${sigmas}, Hyst=${highPct}/${lowPct}%, MinSpan=${minSpan}px, Spurs=${spurLen}px`, 'info');
         }
 
         document.getElementById('presetFinePen').addEventListener('click', () => {
-            applyPreset('1.0, 1.8', 95.0, 85, 16, 16);
+            applyPreset('1.0, 1.8', 95.0, 85, 16, 16, 'presetFinePen');
         });
         document.getElementById('presetMarker').addEventListener('click', () => {
-            applyPreset('1.5, 2.5', 97.0, 90, 22, 24);
+            applyPreset('1.5, 2.5', 97.0, 90, 22, 24, 'presetMarker');
         });
         document.getElementById('presetNoisy').addEventListener('click', () => {
-            applyPreset('2.0, 3.0', 98.0, 92, 30, 28);
+            applyPreset('2.0, 3.0', 98.0, 92, 30, 28, 'presetNoisy');
         });
 
         let loadedImg = null;

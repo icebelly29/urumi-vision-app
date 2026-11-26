@@ -23,14 +23,15 @@ This manual provides step-by-step instructions to set up the physical cutting be
 
 ## 1. Overview and Pen-Color Rules
 
-Urumi Vision converts hand-drawn lines and shapes on a cardboard sheet into a millimeter-accurate (`1:1 mm`), 4-layer CNC SVG file. Each pen color controls a specific machine tool:
+Urumi Vision converts hand-drawn lines and shapes on a cardboard sheet into a millimeter-accurate (`1:1 mm`), 4-layer CNC SVG file. The SVG file contains 4 ordered semantic `<g>` layers:
 
-| Drawing Color | Tool Layer ID | SVG Group | Machine Operation |
-| :--- | :--- | :--- | :--- |
-| **Red** | `score` | `<g id="red">` | Partial-depth cut through the top paper liner for outward folds (runs 1st). |
-| **Green** | `crease` | `<g id="green">` | Blunt wheel impression for inward folds without cutting fibers (runs 2nd). |
-| **Blue** | `thru_cut` | `<g id="blue">` | Full-depth blade cut all the way through the cardboard (runs 3rd). |
-| **Black** | `thru_cut` | `<g id="blue">` | Full-depth blade cut (mapped to the same `thru_cut` layer as Blue). |
+| Layer # | Drawing Color / Input | Tool Layer ID | SVG Group | Machine Operation |
+| :--- | :--- | :--- | :--- | :--- |
+| **1** | *(Hardware reference)* | `bed` | `<g id="bed" data-role="reference">` | Machine bed frame (`775 × 1065 mm`) and cardboard boundary polygon (reference only; ignored by cutter). |
+| **2** | **Red** | `score` | `<g id="red">` | Partial-depth cut through the top paper liner for outward folds (runs 1st). |
+| **3** | **Green** | `crease` | `<g id="green">` | Blunt wheel impression for inward folds without cutting fibers (runs 2nd). |
+| **4** | **Blue** | `thru_cut` | `<g id="blue">` | Full-depth blade cut all the way through the cardboard (runs 3rd). |
+| **—** | **Black** | `thru_cut` | `<g id="blue">` | Full-depth blade cut (mapped to the same `thru_cut` layer as Blue). |
 
 **Supported Drawing Media:**
 - Fine ballpoint pens (`0.5 mm` – `0.7 mm`)
